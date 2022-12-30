@@ -1,5 +1,5 @@
 name = "CommandLine"
-uuid = ""b5bac2b0-583b-4e48-892f-005a2a7cf04f""
+uuid = "b5bac2b0-583b-4e48-892f-005a2a7cf04f"
 authors = ["Adam Ferreira"]
 version = "0.0.1"
 
