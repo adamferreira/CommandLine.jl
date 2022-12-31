@@ -1,4 +1,1 @@
-using CommandLine
-
-c = `powershell -Command dir` # `cmd /c `
-p = run(c)
+include("test_paths.jl")

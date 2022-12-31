@@ -20,6 +20,9 @@ posix_cmd(cmd::Base.Cmd) = cmd
 windows_cmd(cmd::Base.Cmd) = `cmd /C $cmd`
 powershell_cmd(cmd::Base.Cmd) = `powershell -Command $cmd`
 
+include("path.jl")
+export AbstractPath, PosixPath, WindowsPath, nodes, join
+
 # Precompile CommandLine package
 __precompile__()
 end
