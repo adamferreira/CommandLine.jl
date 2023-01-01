@@ -1,5 +1,4 @@
 module CommandLine
-
 """
 Instead of immediately running the command, backticks create a Cmd object to represent the command. 
 You can use this object to connect the command to others via pipes, run it, and read or write to it.
@@ -16,12 +15,21 @@ One option to run these commands is to invoke cmd.exe, for example cmd /C echo h
 Alternatively Julia can be run inside a Posix environment such as Cygwin.
 """
 
+import Base.:(==)
+
 posix_cmd(cmd::Base.Cmd) = cmd
 windows_cmd(cmd::Base.Cmd) = `cmd /C $cmd`
 powershell_cmd(cmd::Base.Cmd) = `powershell -Command $cmd`
 
 include("path.jl")
 export AbstractPath, PosixPath, WindowsPath, nodes, join
+
+include("system.jl")
+export @path, pathtype
+
+include("Session/session.jl")
+
+bash_session()
 
 # Precompile CommandLine package
 __precompile__()
