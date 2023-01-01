@@ -28,8 +28,15 @@ include("system.jl")
 export @path, pathtype
 
 include("Session/session.jl")
+export LocalSession, BashSession, StoringConfig, command
 
-bash_session()
+
+session = BashSession(; template_config = StoringConfig(), type = LocalSession)
+@time p, in, out, err = command(session, `ls .`)()
+println(out)
+println("Begin")
+#@time p, in, out, err = command(session, `sleep 5 '&&' echo "1" '&&' sleep 5 '&&' echo "2"`)()
+#@show out
 
 # Precompile CommandLine package
 __precompile__()
