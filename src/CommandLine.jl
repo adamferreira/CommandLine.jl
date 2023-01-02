@@ -28,15 +28,21 @@ include("system.jl")
 export @path, pathtype
 
 include("Session/session.jl")
-export LocalSession, BashSession, StoringConfig, command
+export LocalSession, run
 
 
-session = BashSession(; template_config = StoringConfig(), type = LocalSession)
-@time p, in, out, err = command(session, `ls .`)()
-println(out)
-println("Begin")
-#@time p, in, out, err = command(session, `sleep 5 '&&' echo "1" '&&' sleep 5 '&&' echo "2"`)()
+#session = BashSession(; template_config = StoringConfig(), type = LocalSession)
+#@time p, in, out, err = command(session, `ls .`)()
+#println(out)
+#@time p, in, out, err = command(session, `"for((i=1;i<=10;i+=1)); do sleep 1; echo "Toto"; done"`)() #command(session, `echo "Step !" '&&' sleep 5 '&&' echo "Step 2 !"`)()
 #@show out
+
+
+v = ["1"]
+session = local_bash_session()
+@show v
+run(session, `"for((i=1;i<=10;i+=1)); do sleep 1; echo "Toto"; done"`, new_out = x -> println(strip(x)))
+@show v
 
 # Precompile CommandLine package
 __precompile__()

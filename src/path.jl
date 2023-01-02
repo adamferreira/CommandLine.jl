@@ -1,7 +1,9 @@
+"""
 @enum PathType begin
     posix_path = 1
     windows_path
 end
+"""
 
 abstract type AbstractPath end
 nodes(path::AbstractPath) = path.nodes
