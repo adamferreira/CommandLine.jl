@@ -1,6 +1,6 @@
 
 abstract type AbstractSession end
-struct LocalSession <: AbstractSession
+mutable struct LocalSession <: AbstractSession
     # Formatting function to format command before submission
     # for example 'ls' on windows using bash will be 'cmd /C bash -c ls'
     cmd_decorator::Function
@@ -9,25 +9,26 @@ end
 format(session::AbstractSession, cmd::Base.AbstractCmd) = session.cmd_decorator(cmd)
 iswindows(::LocalSession) = Sys.iswindows()
 
-
-
 """
-ignorestatus::Bool: If true (defaults to false), then the Cmd will not throw an error if the return code is nonzero.
-
-detach::Bool: If true (defaults to false), then the Cmd will be run in a new process group, allowing it to outlive the julia process and not have Ctrl-C passed to it.
-windows_verbatim::Bool: If true (defaults to false), then on Windows the Cmd will send a command-line string to the process with no quoting or escaping of arguments, even arguments containing spaces. 
-(On Windows, arguments are sent to a program as a single "command-line" string, and programs are responsible for parsing it into arguments. By default, empty arguments and arguments with spaces or tabs are quoted with double quotes " in the command line, and/or " are preceded by backslashes. 
-windows_verbatim=true is useful for launching programs that parse their command line in nonstandard ways.) Has no effect on non-Windows systems.
-
-windows_hide::Bool: If true (defaults to false), then on Windows no new console window is displayed when the Cmd is executed. 
-This has no effect if a console is already open or on non-Windows systems.
-
-env: Set environment variables to use when running the Cmd. 
-env is either a dictionary mapping strings to strings, an array of strings of the form "var=val", an array or tuple of "var"=>val pairs. In order to modify (rather than replace) the existing environment, initialize env with copy(ENV) and then set env["var"]=val as desired. 
-To add to an environment block within a Cmd object without replacing all elements, use addenv() which will return a Cmd object with the updated environment.
-
-dir::AbstractString: Specify a working directory for the command (instead of the current directory).
+function async_reader(io::IO, timeout_sec)::Channel
+    ch = Channel(1)
+    task = @async begin
+        reader_task = current_task()
+        function timeout_cb(timer)
+            put!(ch, :timeout)
+            Base.throwto(reader_task, InterruptException())
+        end
+        timeout = Timer(timeout_cb, timeout_sec)
+        data = String(readavailable(io))
+        if data == ""; put!(ch, :eof); return; end
+        timeout_sec > 0 && close(timeout) # Cancel the timeout
+        put!(ch, data)
+    end
+    bind(ch, task)
+    return ch
+end
 """
+
 function realtime_read(ostream::IO, T::Type; newentry::Function = x -> x)
     # Open a Channel that can only store one entry at a given time
     ch = Channel(1)
@@ -52,9 +53,50 @@ function realtime_read(ostream::IO, T::Type; newentry::Function = x -> x)
     # Note: Both taks will end when ostream is closed (externally by the process that opened it)
 end
 
+"""
+    run(
+        cmd::Base.AbstractCmd;
+        windows_verbatim::Bool = false,
+        new_in::Union{Function, Nothing} = nothing,
+        new_out::Union{Function, Nothing} = nothing,
+        new_err::Union{Function, Nothing} = nothing
+    )
+
+Run a `Cmd` object.
+
+* `ignorestatus::Bool`: If `true` (defaults to `false`), then the `Cmd` will not throw an
+  error if the return code is nonzero.
+* `windows_verbatim::Bool`: If `true` (defaults to `false`), then on Windows the `Cmd` will
+  send a command-line string to the process with no quoting or escaping of arguments, even
+  arguments containing spaces. (On Windows, arguments are sent to a program as a single
+  "command-line" string, and programs are responsible for parsing it into arguments. By
+  default, empty arguments and arguments with spaces or tabs are quoted with double quotes
+  `"` in the command line, and `\\` or `"` are preceded by backslashes.
+  `windows_verbatim=true` is useful for launching programs that parse their command line in
+  nonstandard ways.) Has no effect on non-Windows systems.
+* `windows_hide::Bool`: If `true` (defaults to `false`), then on Windows no new console
+  window is displayed when the `Cmd` is executed. This has no effect if a console is
+  already open or on non-Windows systems.
+* `env`: Set environment variables to use when running the `Cmd`. `env` is either a
+  dictionary mapping strings to strings, an array of strings of the form `"var=val"`, an
+  array or tuple of `"var"=>val` pairs. In order to modify (rather than replace) the
+  existing environment, initialize `env` with `copy(ENV)` and then set `env["var"]=val` as
+  desired.  To add to an environment block within a `Cmd` object without replacing all
+  elements, use [`addenv()`](@ref) which will return a `Cmd` object with the updated environment.
+* `dir::AbstractString`: Specify a working directory for the command (instead
+  of the current directory).
+
+For any keywords that are not specified, the current settings from `cmd` are used. Normally,
+to create a `Cmd` object in the first place, one uses backticks, e.g.
+"""
+
+# TODO: comment usage of new_in, new_out, new_err
 function run(
     cmd::Base.AbstractCmd;
     windows_verbatim::Bool = false,
+    windows_hide::Bool = false,
+    dir::AbstractString = "",
+    env = nothing,
     new_in::Union{Function, Nothing} = nothing,
     new_out::Union{Function, Nothing} = nothing,
     new_err::Union{Function, Nothing} = nothing
@@ -67,9 +109,19 @@ function run(
 
     # Construct the pipeline with our custom pipes
     pipeline = Base.pipeline(
-        # Do not throw Exception with the process finish with non-zero status code (ignorestatus = true)
-        # As we are doing everything asynchronously
-        Base.Cmd(cmd; windows_verbatim = windows_verbatim, ignorestatus = true),
+        Base.Cmd(
+            cmd; 
+            # Do not throw Exception with the process finish with non-zero status code (ignorestatus = true)
+            # As we are doing everything asynchronously
+            ignorestatus = true,
+            # Do not detach as this method `run` can be wrapped in a Yask
+            detach = false, 
+            windows_verbatim = windows_verbatim,
+            windows_hide = windows_hide,
+            env = env,
+            dir = dir
+        ),
+        # Redirect standart in,out and err of the new process to our custom pipes
         stdin = pipe_in,
         stdout = pipe_out,
         stderr = pipe_err,
@@ -82,7 +134,7 @@ function run(
     task_out = isnothing(new_out) ? nothing : @async realtime_read(pipe_out, String; newentry = new_out)
     task_err = isnothing(new_err) ? nothing : @async realtime_read(pipe_err, String; newentry = new_err)
 
-    # Launch the command asynchronously
+    # Launch the command asynchronously in a separate process
     # Otherwise Base.run will read the whole content of stdout in one go and close the pipes
     process = Base.run(pipeline, wait = false)
 
@@ -109,6 +161,7 @@ function run(
     run(
         format(session, cmd);
         windows_verbatim = iswindows(session),
+        windows_hide = false,
         new_in = new_in,
         new_out = new_out,
         new_err = new_err

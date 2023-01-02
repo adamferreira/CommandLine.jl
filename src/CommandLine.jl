@@ -28,21 +28,24 @@ include("system.jl")
 export @path, pathtype
 
 include("Session/session.jl")
-export LocalSession, run
+export LocalSession, local_bash_session, run
+
+test_session = CommandLine.local_bash_session()
 
 
-#session = BashSession(; template_config = StoringConfig(), type = LocalSession)
-#@time p, in, out, err = command(session, `ls .`)()
-#println(out)
-#@time p, in, out, err = command(session, `"for((i=1;i<=10;i+=1)); do sleep 1; echo "Toto"; done"`)() #command(session, `echo "Step !" '&&' sleep 5 '&&' echo "Step 2 !"`)()
-#@show out
-
-
-v = ["1"]
-session = local_bash_session()
-@show v
-run(session, `"for((i=1;i<=10;i+=1)); do sleep 1; echo "Toto"; done"`, new_out = x -> println(strip(x)))
-@show v
+outputs = Vector{String}()
+function treat_string_blob(x::String)
+    if x == "" return; end
+    for line in split(x, '\n')
+        if line != ""
+            push!(outputs, line)
+        end
+    end
+end
+@time process = CommandLine.run(test_session, `ls`;
+    new_out = x::String -> treat_string_blob(x)
+)
+@show outputs
 
 # Precompile CommandLine package
 __precompile__()
