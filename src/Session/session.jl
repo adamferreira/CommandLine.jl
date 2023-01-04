@@ -1,33 +1,59 @@
 
+"""
+Should define
+* `iswindows(::AbstractSession)`
+* `pathtype(::AbstractSession)`
+# Formatting function to format command before submission
+# for example 'ls' on windows using bash will be 'cmd /C bash -c ls'
+* `format(session::AbstractSession, cmd::Base.AbstractCmd)`
+* A field `pwd::AbstractPath`
+"""
 abstract type AbstractSession end
-mutable struct LocalSession <: AbstractSession
-    # Formatting function to format command before submission
-    # for example 'ls' on windows using bash will be 'cmd /C bash -c ls'
-    cmd_decorator::Function
-    pathtype::Type{<:AbstractPath}
-end
-format(session::AbstractSession, cmd::Base.AbstractCmd) = session.cmd_decorator(cmd)
-iswindows(::LocalSession) = Sys.iswindows()
+"""
+    pwd(session::AbstractSession) -> AbstractPath
+Returns the current working directly of the session.
+"""
+pwd(session::AbstractSession) = session.pwd
 
-"""
-function async_reader(io::IO, timeout_sec)::Channel
-    ch = Channel(1)
-    task = @async begin
-        reader_task = current_task()
-        function timeout_cb(timer)
-            put!(ch, :timeout)
-            Base.throwto(reader_task, InterruptException())
+abstract type LocalSession <: AbstractSession end
+iswindows(::LocalSession) = Sys.iswindows()
+pathtype(session::LocalSession) = iswindows(session) ? WindowsPath : PosixPath
+
+struct LocalBashSession <: LocalSession 
+    pwd::AbstractPath
+
+    function LocalBashSession()
+        # Deduce path type from OS type
+        ptype = Sys.iswindows() ? WindowsPath : PosixPath
+        # Create a local bash session
+        session = new(ptype(Base.pwd()))
+        # Check that the current operating system as the bash program (by default on posix systems)
+        process = CommandLine.run(`ls`, session)
+        if process.exitcode != 0
+            throw(SystemError("Your Windows system does not seem to have 'bash' program installed (error code $(process.exitcode))."))
         end
-        timeout = Timer(timeout_cb, timeout_sec)
-        data = String(readavailable(io))
-        if data == ""; put!(ch, :eof); return; end
-        timeout_sec > 0 && close(timeout) # Cancel the timeout
-        put!(ch, data)
+        return session
     end
-    bind(ch, task)
-    return ch
 end
-"""
+
+
+#posix_cmd(cmd::Base.Cmd) = cmd
+#windows_cmd(cmd::Base.Cmd) = `cmd /C $cmd`
+#powershell_cmd(cmd::Base.Cmd) = `powershell -Command $cmd`
+
+
+function format(session::LocalBashSession, cmd::Base.AbstractCmd)
+    # On windows bash il called through cmd.exe
+    if iswindows(session)
+        # TODO: collect will not work with OrCmd and AndCmd (ex: when using pipeline(cmd1, cmd2))
+        return Base.Cmd(vcat(["cmd", "/C", "bash", "-c"], "\"", collect(cmd), "\""))
+    else
+        # If not windows, the command formatting function does nothing to a command.
+        # We assume that 'bash' is by default available on those systems.
+        return cmd
+    end
+end
+
 
 function realtime_read(ostream::IO, T::Type; newentry::Function = x -> x)
     # Open a Channel that can only store one entry at a given time
@@ -62,7 +88,7 @@ end
         new_err::Union{Function, Nothing} = nothing
     )
 
-Run a `Cmd` object.
+Run a `Cmd` object sequentially in a separate process.
 
 * `ignorestatus::Bool`: If `true` (defaults to `false`), then the `Cmd` will not throw an
   error if the return code is nonzero.
@@ -85,12 +111,13 @@ Run a `Cmd` object.
   elements, use [`addenv()`](@ref) which will return a `Cmd` object with the updated environment.
 * `dir::AbstractString`: Specify a working directory for the command (instead
   of the current directory).
+* `new_in::Union{Function, Nothing}`: Callback that will be called for each new entry avaible in the separate process `stdin`
+* `new_out::Union{Function, Nothing}`: Callback that will be called for each new entry avaible in the separate process `stdout`
+* `new_err::Union{Function, Nothing}`: Callback that will be called for each new entry avaible in the separate process `stder`
 
 For any keywords that are not specified, the current settings from `cmd` are used. Normally,
 to create a `Cmd` object in the first place, one uses backticks, e.g.
 """
-
-# TODO: comment usage of new_in, new_out, new_err
 function run(
     cmd::Base.AbstractCmd;
     windows_verbatim::Bool = false,
@@ -152,13 +179,13 @@ function run(
 end
 
 function run(
-    session::AbstractSession,
-    cmd::Base.AbstractCmd;
+    cmd::Base.AbstractCmd,
+    session::AbstractSession;
     new_in::Union{Function, Nothing} = nothing,
     new_out::Union{Function, Nothing} = nothing,
     new_err::Union{Function, Nothing} = nothing
 )
-    run(
+    CommandLine.run(
         format(session, cmd);
         windows_verbatim = iswindows(session),
         windows_hide = false,
@@ -168,23 +195,20 @@ function run(
     )
 end
 
-
-function local_bash_session()
-    # Check that the current operating system as the bash program (by default on posix systems)
-    # To do that we create a temporary local session
-   if Sys.iswindows()
-        format_fct = (c::Base.AbstractCmd) -> Base.Cmd(vcat(["cmd", "/C", "bash", "-c"], "\"", collect(c), "\""))
-        local_session = LocalSession(format_fct, WindowsPath)
-        process = run(local_session, `ls`)
-        if process.exitcode != 0
-            @show in, out, err
-            throw(SystemError("Your Windows system does not seem to have 'bash' program installed (error code $(process.exitcode))."))
-        end
-        # Else return new bash session
-        return LocalSession(format_fct, WindowsPath)
-    else
-        # If not windows, the command formatting function does nothing to a command.
-        # We assume that 'bash' is by default available on those systems.
-        return LocalSession((c::Base.AbstractCmd) -> c, PosixPath)
+"""
+    checkoutput(session::AbstractSession, cmd::Base.AbstractCmd)
+Calls `CommandLine.run` and returns the whole standart output in a `String`.
+If the call fails, the standart err is outputed as a `String` is a raised Exception.
+"""
+function checkoutput(cmd::Base.AbstractCmd, session::AbstractSession)
+    out, err = "", ""
+    process = CommandLine.run(cmd, session;
+        new_out = x::String -> out = out * x,
+        new_err = x::String -> err = err * x
+    )
+    if process.exitcode != 0
+        throw(Base.IOError("$err", process.exitcode))
     end
+
+    return out
 end

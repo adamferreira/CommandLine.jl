@@ -17,35 +17,16 @@ Alternatively Julia can be run inside a Posix environment such as Cygwin.
 
 import Base.:(==)
 
-posix_cmd(cmd::Base.Cmd) = cmd
-windows_cmd(cmd::Base.Cmd) = `cmd /C $cmd`
-powershell_cmd(cmd::Base.Cmd) = `powershell -Command $cmd`
-
 include("path.jl")
-export AbstractPath, PosixPath, WindowsPath, nodes, join
-
-include("system.jl")
-export @path, pathtype
+export  AbstractPath, PosixPath, WindowsPath,
+        nodes, join
 
 include("Session/session.jl")
-export LocalSession, local_bash_session, run
+export  AbstractSession, LocalSession, LocalBashSession,
+        run, checkoutput
 
-test_session = CommandLine.local_bash_session()
-
-
-outputs = Vector{String}()
-function treat_string_blob(x::String)
-    if x == "" return; end
-    for line in split(x, '\n')
-        if line != ""
-            push!(outputs, line)
-        end
-    end
-end
-@time process = CommandLine.run(test_session, `ls`;
-    new_out = x::String -> treat_string_blob(x)
-)
-@show outputs
+include("System/system.jl")
+export @path, pathtype, ls
 
 # Precompile CommandLine package
 __precompile__()
