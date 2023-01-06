@@ -36,7 +36,7 @@ end
 @__define_pathtype WindowsPath
 
 __split_char(::Type{PosixPath}) = "/"
-__split_char(::Type{WindowsPath}) = "\\"
+__split_char(::Type{WindowsPath}) = "\\\\"
 Base.convert(::Type{String}, x::AbstractPath) = Base.join(nodes(x), __split_char(typeof(x)))
 Base.convert(t::Type{PosixPath}, x::AbstractPath) = t(nodes(x))
 Base.convert(t::Type{WindowsPath}, x::AbstractPath) = t(nodes(x))

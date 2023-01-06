@@ -23,10 +23,41 @@ export  AbstractPath, PosixPath, WindowsPath,
 
 include("Session/session.jl")
 export  AbstractSession, LocalSession, LocalBashSession,
-        run, checkoutput
+        run, checkoutput, showoutput
 
 include("System/system.jl")
 export @path, pathtype, ls
+
+function f1()
+    s = LocalBashSession()
+    out1 = checkoutput(`"for((i=1;i<=100;i+=1)); do sleep 0.1; echo "Toto1"; done"`, s)
+    out2 = checkoutput(`"for((i=1;i<=100;i+=1)); do sleep 0.1; echo "Toto2"; done"`, s)
+    return out1, out2
+end
+
+function f2()
+    s = LocalBashSession()
+    t1 = @async checkoutput(`"for((i=1;i<=100;i+=1)); do sleep 0.1; echo "Toto1"; done"`, s)
+    t2 = @async checkoutput(`"for((i=1;i<=100;i+=1)); do sleep 0.1; echo "Toto2"; done"`, s)
+    return fetch(t1), fetch(t2)
+end
+
+function f3()
+    s = LocalBashSession()
+    out1 = showoutput(`"for((i=1;i<=10;i+=1)); do sleep 1; echo "Toto1"; done"`, s)
+    out2 = showoutput(`"for((i=1;i<=10;i+=1)); do sleep 1; echo "Toto2"; done"`, s)
+    return out1, out2
+end
+
+function f4()
+    s = LocalBashSession()
+    t1 = @async showoutput(`"for((i=1;i<=10;i+=1)); do sleep 1; echo "Toto1"; done"`, s)
+    t2 = @async showoutput(`"for((i=1;i<=10;i+=1)); do sleep 3; echo "Toto2"; done"`, s)
+    return fetch(t1), fetch(t2)
+end
+
+@show ls2(@path "..")
+println(@path ".\\.git")
 
 # Precompile CommandLine package
 __precompile__()

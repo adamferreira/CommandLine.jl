@@ -189,6 +189,8 @@ function run(
         format(session, cmd);
         windows_verbatim = iswindows(session),
         windows_hide = false,
+        dir = convert(String, pwd(session)),
+        env = nothing,
         new_in = new_in,
         new_out = new_out,
         new_err = new_err
@@ -211,4 +213,16 @@ function checkoutput(cmd::Base.AbstractCmd, session::AbstractSession)
     end
 
     return out
+end
+
+function showoutput(cmd::Base.AbstractCmd, session::AbstractSession)
+    err = ""
+    println("$(cmd)")
+    process = CommandLine.run(cmd, session;
+        new_out = x::String -> print(x),
+        new_err = x::String -> (print(x); err = err * x)
+    )
+    if process.exitcode != 0
+        throw(Base.IOError("$err", process.exitcode))
+    end
 end
