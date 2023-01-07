@@ -9,7 +9,7 @@ abstract type AbstractPath end
 nodes(path::AbstractPath) = path.nodes
 
 # Utilitaries on AbstractPaths
-Base.show(io::IO, x::AbstractPath) = Base.print(io, "$(Base.convert(String, x))")
+Base.show(io::IO, x::AbstractPath) = Base.print(io, string(x))
 # Concatenation Utilitaries (TODO: More generic way ?)
 join(x::AbstractPath, y::AbstractString...) = typeof(x)(Base.vcat(nodes(x), y...))
 join(x::AbstractPath, y::Vector{String}) = typeof(x)(Base.vcat(nodes(x), y)) #TODO: Vector of abstract strings ?
