@@ -6,26 +6,26 @@ end
 """
 
 abstract type AbstractPath end
-nodes(path::AbstractPath) = path.nodes
+segments(path::AbstractPath) = path.segments
 
 # Utilitaries on AbstractPaths
-Base.show(io::IO, x::AbstractPath) = Base.print(io, string(x))
+Base.show(io::IO, x::AbstractPath) = Base.show(io, Base.string(x))
 # Concatenation Utilitaries (TODO: More generic way ?)
-join(x::AbstractPath, y::AbstractString...) = typeof(x)(Base.vcat(nodes(x), y...))
-join(x::AbstractPath, y::Vector{String}) = typeof(x)(Base.vcat(nodes(x), y)) #TODO: Vector of abstract strings ?
-join(x::AbstractPath, y::AbstractPath) = typeof(x)(Base.vcat(nodes(x), nodes(y)))
+joinpath(x::AbstractPath, y::AbstractString...) = typeof(x)(Base.vcat(segments(x), y...))
+joinpath(x::AbstractPath, y::Vector{String}) = typeof(x)(Base.vcat(segments(x), y)) #TODO: Vector of abstract strings ?
+joinpath(x::AbstractPath, y::AbstractPath) = typeof(x)(Base.vcat(segments(x), segments(y)))
 
 # Comparison Utilitaries
-Base.:(==)(x::AbstractPath, y::AbstractPath) = (typeof(x)==typeof(y)) && (nodes(x)==nodes(y))
+Base.:(==)(x::AbstractPath, y::AbstractPath) = (typeof(x)==typeof(y)) && (segments(x)==segments(y))
 Base.:(==)(x::AbstractPath, y::String) = "$x" == y
 
 
 macro __define_pathtype(PathType)
     return quote
         struct $PathType <: AbstractPath
-            nodes::Vector{String}
-            $PathType(nodes::Vector{String}) = new(nodes)
-            $PathType(nodes::AbstractString...) = new([nodes...])
+            segments::Vector{String}
+            $PathType(segments::Vector{String}) = new(segments)
+            $PathType(segments::AbstractString...) = new([segments...])
             # TODO: Raise Exception when split is unsuccessfull ?
             $PathType(path::AbstractString) = new(Base.split(path, __split_char($PathType)))
         end
@@ -36,7 +36,31 @@ end
 @__define_pathtype WindowsPath
 
 __split_char(::Type{PosixPath}) = "/"
-__split_char(::Type{WindowsPath}) = "\\\\"
-Base.convert(::Type{String}, x::AbstractPath) = Base.join(nodes(x), __split_char(typeof(x)))
-Base.convert(t::Type{PosixPath}, x::AbstractPath) = t(nodes(x))
-Base.convert(t::Type{WindowsPath}, x::AbstractPath) = t(nodes(x))
+__split_char(::Type{WindowsPath}) = "\\"
+Base.convert(::Type{String}, x::AbstractPath) = Base.join(segments(x), __split_char(typeof(x)))
+Base.string(x::AbstractPath) = Base.join(segments(x), __split_char(typeof(x)))
+Base.convert(t::Type{PosixPath}, x::AbstractPath) = t(segments(x))
+Base.convert(t::Type{WindowsPath}, x::AbstractPath) = t(segments(x))
+
+
+"""
+    Get the path type (AbstractPath) of the current operating system
+"""
+function pathtype()
+    if Sys.iswindows()
+        return WindowsPath
+    end
+    if Sys.isapple() || Sys.isunix()
+        return PosixPath
+    end
+end
+
+
+"""
+    Macro to create the appropriate AbstractPath from the current operating system
+"""
+macro path(args...)
+    pathtype()(args...)
+end
+
+joinpath(x::AbstractString...) = pathtype()(x...)
