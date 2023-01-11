@@ -3,10 +3,13 @@
 Should define
 * `iswindows(::AbstractSession)`
 * `pathtype(::AbstractSession)`
-# Formatting function to format command before submission
+
+# A formatting function to format command before submission
 # for example 'ls' on windows using bash will be 'cmd /C bash -c ls'
-* `format(session::AbstractSession, cmd::Base.AbstractCmd)`
-* A field `pwd::AbstractPath`
+* `format(session <: AbstractSession, cmd::Base.AbstractCmd)`
+
+* A field `pwd`
+* A field `env`
 """
 abstract type AbstractSession end
 """
@@ -14,34 +17,33 @@ abstract type AbstractSession end
 Returns the current working directly of the session.
 """
 pwd(session::AbstractSession) = session.pwd
+env(session::AbstractSession) = session.env
 
 abstract type LocalSession <: AbstractSession end
 iswindows(::LocalSession) = Sys.iswindows()
-pathtype(session::LocalSession) = iswindows(session) ? WindowsPath : PosixPath
 
-struct LocalBashSession <: LocalSession 
-    pwd::AbstractPath
+struct LocalBashSession <: LocalSession
+    # No explicit typing as we want to handle all path-like types.
+    # string(pwd) must be defined
+    pwd
+    # environment variables
+    env
 
-    function LocalBashSession()
-        # Deduce path type from OS type
-        ptype = Sys.iswindows() ? WindowsPath : PosixPath
+    function LocalBashSession(; pwd = Base.pwd(), check::Bool = true, env = nothing)
         # Create a local bash session
-        session = new(ptype(Base.pwd()))
+        session = new(pwd, env)
         # Check that the current operating system as the bash program (by default on posix systems)
-        process = CommandLine.run(`ls`, session)
-        if process.exitcode != 0
-            throw(SystemError("Your Windows system does not seem to have 'bash' program installed (error code $(process.exitcode))."))
+        if check
+            process = CommandLine.run(`ls`, session)
+            process.exitcode == 0 || throw(SystemError("Your Windows system does not seem to have 'bash' program installed (error code $(process.exitcode))."))
         end
         return session
     end
 end
 
-
 #posix_cmd(cmd::Base.Cmd) = cmd
 #windows_cmd(cmd::Base.Cmd) = `cmd /C $cmd`
 #powershell_cmd(cmd::Base.Cmd) = `powershell -Command $cmd`
-
-
 function format(session::LocalBashSession, cmd::Base.AbstractCmd)
     # On windows bash il called through cmd.exe
     if iswindows(session)
@@ -53,7 +55,6 @@ function format(session::LocalBashSession, cmd::Base.AbstractCmd)
         return cmd
     end
 end
-
 
 function realtime_read(ostream::IO, T::Type; newentry::Function = x -> x)
     # Open a Channel that can only store one entry at a given time
@@ -111,9 +112,9 @@ Run a `Cmd` object sequentially in a separate process.
   elements, use [`addenv()`](@ref) which will return a `Cmd` object with the updated environment.
 * `dir::AbstractString`: Specify a working directory for the command (instead
   of the current directory).
-* `new_in::Union{Function, Nothing}`: Callback that will be called for each new entry avaible in the separate process `stdin`
-* `new_out::Union{Function, Nothing}`: Callback that will be called for each new entry avaible in the separate process `stdout`
-* `new_err::Union{Function, Nothing}`: Callback that will be called for each new entry avaible in the separate process `stder`
+* `handle_instream::Union{Function, Nothing}`: Callback that will be called for each new entry avaible in the separate process `stdin`
+* `handle_outstream::Union{Function, Nothing}`: Callback that will be called for each new entry avaible in the separate process `stdout`
+* `handle_errstream::Union{Function, Nothing}`: Callback that will be called for each new entry avaible in the separate process `stder`
 
 For any keywords that are not specified, the current settings from `cmd` are used. Normally,
 to create a `Cmd` object in the first place, one uses backticks, e.g.
@@ -124,15 +125,15 @@ function run(
     windows_hide::Bool = false,
     dir::AbstractString = "",
     env = nothing,
-    new_in::Union{Function, Nothing} = nothing,
-    new_out::Union{Function, Nothing} = nothing,
-    new_err::Union{Function, Nothing} = nothing
+    handle_instream::Union{Function, Nothing} = nothing,
+    handle_outstream::Union{Function, Nothing} = nothing,
+    handle_errstream::Union{Function, Nothing} = nothing
 )
 
     # Open the different communication pipes
-    pipe_in = isnothing(new_in) ? nothing : Base.BufferStream()
-    pipe_out = isnothing(new_out) ? nothing : Base.BufferStream()
-    pipe_err = isnothing(new_err) ? nothing : Base.BufferStream()
+    pipe_in = isnothing(handle_instream) ? nothing : Base.BufferStream()
+    pipe_out = isnothing(handle_outstream) ? nothing : Base.BufferStream()
+    pipe_err = isnothing(handle_errstream) ? nothing : Base.BufferStream()
 
     # Construct the pipeline with our custom pipes
     pipeline = Base.pipeline(
@@ -158,8 +159,8 @@ function run(
 
     # Launch the task to handle the pipes (IO) that will be filled by Base.run
     task_in = nothing # Not supported yet
-    task_out = isnothing(new_out) ? nothing : @async realtime_read(pipe_out, String; newentry = new_out)
-    task_err = isnothing(new_err) ? nothing : @async realtime_read(pipe_err, String; newentry = new_err)
+    task_out = isnothing(handle_outstream) ? nothing : @async realtime_read(pipe_out, String; newentry = handle_outstream)
+    task_err = isnothing(handle_errstream) ? nothing : @async realtime_read(pipe_err, String; newentry = handle_errstream)
 
     # Launch the command asynchronously in a separate process
     # Otherwise Base.run will read the whole content of stdout in one go and close the pipes
@@ -181,19 +182,19 @@ end
 function run(
     cmd::Base.AbstractCmd,
     session::AbstractSession;
-    new_in::Union{Function, Nothing} = nothing,
-    new_out::Union{Function, Nothing} = nothing,
-    new_err::Union{Function, Nothing} = nothing
+    handle_instream::Union{Function, Nothing} = nothing,
+    handle_outstream::Union{Function, Nothing} = nothing,
+    handle_errstream::Union{Function, Nothing} = nothing
 )
     CommandLine.run(
         format(session, cmd);
         windows_verbatim = iswindows(session),
         windows_hide = false,
-        dir = convert(String, pwd(session)),
-        env = nothing,
-        new_in = new_in,
-        new_out = new_out,
-        new_err = new_err
+        dir = string(pwd(session)),
+        env = env(session),
+        handle_instream = handle_instream,
+        handle_outstream = handle_outstream,
+        handle_errstream = handle_errstream
     )
 end
 
@@ -205,8 +206,8 @@ If the call fails, the standart err is outputed as a `String` is a raised Except
 function checkoutput(cmd::Base.AbstractCmd, session::AbstractSession)
     out, err = "", ""
     process = CommandLine.run(cmd, session;
-        new_out = x::String -> out = out * x,
-        new_err = x::String -> err = err * x
+        handle_outstream = x::String -> out = out * x,
+        handle_errstream = x::String -> err = err * x
     )
     if process.exitcode != 0
         throw(Base.IOError("$err", process.exitcode))
@@ -219,8 +220,8 @@ function showoutput(cmd::Base.AbstractCmd, session::AbstractSession)
     err = ""
     println("$(cmd)")
     process = CommandLine.run(cmd, session;
-        new_out = x::String -> print(x),
-        new_err = x::String -> (print(x); err = err * x)
+        handle_outstream = x::String -> print(x),
+        handle_errstream = x::String -> (print(x); err = err * x)
     )
     if process.exitcode != 0
         throw(Base.IOError("$err", process.exitcode))

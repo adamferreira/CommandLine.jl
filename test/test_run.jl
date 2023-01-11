@@ -10,7 +10,7 @@ test_session = CommandLine.LocalBashSession()
 @testset "Test capture stdout" begin
     outputs = Vector{String}()
     process = CommandLine.run(`"for((i=1;i<=3;i+=1)); do sleep 0; echo "Test"; done"`, test_session; 
-        new_out = x::String -> push!(outputs, strip(x))
+        handle_outstream = x::String -> push!(outputs, strip(x))
     )
     
     @test process.exitcode == 0
@@ -21,7 +21,7 @@ end
 @testset "Test capture stderr" begin
     errors = Vector{String}()
     process = CommandLine.run(`unknown_command`, test_session; 
-        new_err = x::String -> push!(errors, strip(x))
+        handle_errstream = x::String -> push!(errors, strip(x))
     )
     
     @test length(errors) >= 1

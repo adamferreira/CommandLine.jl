@@ -4,7 +4,7 @@
 
     @test isa(pp, AbstractPath)
     @test isa(wp, AbstractPath)
-    @test nodes(pp) == nodes(wp)
+    @test segments(pp) == segments(wp)
     @test PosixPath(["A", "B"]) == PosixPath("A", "B")
     @test PosixPath("A/B/C/D") == PosixPath("A", "B", "C", "D")
 end
@@ -29,9 +29,9 @@ end
     @test isa(j1, PosixPath)
     @test isa(j2, WindowsPath)
     @test isa(j3, WindowsPath)
-    @test nodes(j1) == ["A", "B", "C", "D"]
-    @test nodes(j2) == ["A", "B", "C", "D"]
-    @test nodes(j3) == ["A", "B", "A", "B"]
+    @test segments(j1) == ["A", "B", "C", "D"]
+    @test segments(j2) == ["A", "B", "C", "D"]
+    @test segments(j3) == ["A", "B", "A", "B"]
 end
 
 @testset "Test Equals" begin
@@ -45,4 +45,16 @@ end
     @test Base.convert(PosixPath, WindowsPath("A", "B")) == "A/B"
     @test Base.convert(WindowsPath, WindowsPath("A", "B")) != "A/B"
     @test Base.convert(WindowsPath, PosixPath("A", "B")) == WindowsPath("A", "B")
+end
+
+@testset "Test path deduction" begin
+    if Sys.iswindows()
+        @test pathtype() == WindowsPath
+    else
+        @test pathtype() == PosixPath
+    end
+end
+
+@testset "Test path macro" begin
+    @test segments(@path "A" "B" "C") == ["A", "B", "C"]
 end

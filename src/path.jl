@@ -11,9 +11,9 @@ segments(path::AbstractPath) = path.segments
 # Utilitaries on AbstractPaths
 Base.show(io::IO, x::AbstractPath) = Base.show(io, Base.string(x))
 # Concatenation Utilitaries (TODO: More generic way ?)
-joinpath(x::AbstractPath, y::AbstractString...) = typeof(x)(Base.vcat(segments(x), y...))
-joinpath(x::AbstractPath, y::Vector{String}) = typeof(x)(Base.vcat(segments(x), y)) #TODO: Vector of abstract strings ?
-joinpath(x::AbstractPath, y::AbstractPath) = typeof(x)(Base.vcat(segments(x), segments(y)))
+join(x::AbstractPath, y::AbstractString...) = typeof(x)(Base.vcat(segments(x), y...))
+join(x::AbstractPath, y::Vector{String}) = typeof(x)(Base.vcat(segments(x), y)) #TODO: Vector of abstract strings ?
+join(x::AbstractPath, y::AbstractPath) = typeof(x)(Base.vcat(segments(x), segments(y)))
 
 # Comparison Utilitaries
 Base.:(==)(x::AbstractPath, y::AbstractPath) = (typeof(x)==typeof(y)) && (segments(x)==segments(y))
