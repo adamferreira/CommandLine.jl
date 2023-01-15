@@ -1,92 +1,108 @@
 
-"""
-Should define
-* `iswindows(::AbstractSession)`
-* `pathtype(::AbstractSession)`
 
-# A formatting function to format command before submission
-# for example 'ls' on windows using bash will be 'cmd /C bash -c ls'
-* `format(session <: AbstractSession, cmd::Base.AbstractCmd)`
-
-* A field `pwd`
-* A field `env`
-"""
-abstract type AbstractSession end
-"""
-    pwd(session::AbstractSession) -> AbstractPath
-Returns the current working directly of the session.
-"""
-pwd(session::AbstractSession) = session.pwd
-env(session::AbstractSession) = session.env
-
-abstract type LocalSession <: AbstractSession end
-iswindows(::LocalSession) = Sys.iswindows()
-
-struct LocalBashSession <: LocalSession
-    # No explicit typing as we want to handle all path-like types.
-    # string(pwd) must be defined
-    pwd
-    # environment variables
-    env
-
-    function LocalBashSession(; pwd = Base.pwd(), check::Bool = true, env = nothing)
-        # Create a local bash session
-        session = new(pwd, env)
-        # Check that the current operating system as the bash program (by default on posix systems)
-        if check
-            process = CommandLine.run(`ls`, session)
-            process.exitcode == 0 || throw(SystemError("Your Windows system does not seem to have 'bash' program installed (error code $(process.exitcode))."))
+function run_background(
+    cmd::Base.AbstractCmd;
+    windows_verbatim::Bool = false,
+    windows_hide::Bool = false,
+    dir::AbstractString = "",
+    env = nothing
+)
+    function realtime_read(ostream::IO; T::Type = String)
+        # Open a Channel that can only store one entry at a given time
+        ch = Channel(1)
+        # Read ostream asynchronously and write the entries into the channel one entry at a time
+        task_read = @async begin
+            while isopen(ostream)
+                # As the channel as a size 1, the next put! will be blocked until take!(ch) is called
+                # This pause the reading of ostream until the current entry is treated
+                put!(ch, T(readavailable(ostream)))
+            end
         end
-        return session
+        bind(ch, task_read)
+        # Return the binded Channel, the Channel and the task now share the same lifetime
+        return ch
     end
+
+    function realtime_write(istream::IO)
+        # Open a Channel that can only store one entry at a given time
+        ch = Channel(1)
+        # Read the channel asynchronously (one entry at a time) and call `newentry` on every entry
+        task_treat = @async begin
+            while isopen(istream)
+                # Blocks until a entry is avaible in the channel
+                # Takes the entry and unlock the channel to be filled again
+                taken = take!(ch)
+                # Submit the command (\n is needed otherwise multiple commands are joined)
+                write(istream, taken*"\n")
+            end
+        end
+        Base.bind(ch, task_treat)
+        # Return the binded Channel, the Channel and the task now share the same lifetime
+        return ch
+    end
+
+    # Open the different communication pipes
+    # Reading from a BufferStream blocks until data is available
+    pipe_in = Base.Pipe()
+    pipe_out = Base.BufferStream()
+    pipe_err = Base.BufferStream()
+
+    # Construct the pipeline with our custom pipes
+    pipeline = Base.pipeline(
+        Base.Cmd(
+            cmd; 
+            # Do not throw Exception when the process finish with non-zero status code (ignorestatus = true)
+            # As we are doing everything asynchronously
+            ignorestatus = true,
+            # Do not detach as this method `run` can be wrapped in a Yask
+            detach = false, 
+            windows_verbatim = windows_verbatim,
+            windows_hide = windows_hide,
+            env = env,
+            dir = dir
+        ),
+        # Redirect standart in, out and err of the new process to the custom pipes
+        stdin = pipe_in,
+        stdout = pipe_out,
+        stderr = pipe_err,
+        # Do not append as file redirection is not handled here with this system
+        append = false
+    )
+    # Start the backroung process
+    process = Base.run(pipeline; wait = false)
+    ch_out = realtime_read(pipe_out)
+    ch_err = realtime_read(pipe_err)
+    ch_in = realtime_write(pipe_in)
+
+    return process, ch_in, ch_out, ch_err
 end
 
-#posix_cmd(cmd::Base.Cmd) = cmd
-#windows_cmd(cmd::Base.Cmd) = `cmd /C $cmd`
-#powershell_cmd(cmd::Base.Cmd) = `powershell -Command $cmd`
-function format(session::LocalBashSession, cmd::Base.AbstractCmd)
-    # On windows bash il called through cmd.exe
-    if iswindows(session)
-        # TODO: collect will not work with OrCmd and AndCmd (ex: when using pipeline(cmd1, cmd2))
-        return Base.Cmd(vcat(["cmd", "/C", "bash", "-c"], "\"", collect(cmd), "\""))
-    else
-        # If not windows, the command formatting function does nothing to a command.
-        # We assume that 'bash' is by default available on those systems.
-        return cmd
-    end
-end
-
-function realtime_read(ostream::IO, T::Type; newentry::Function = x -> x)
-    # Open a Channel that can only store one entry at a given time
-    ch = Channel(1)
-    
-    # Read ostream asynchronously and write the entries into the channel one entry at a time
-    task_read = @async begin
-        while isopen(ostream)
-            # As the channel as a size 1, the next put! will be blocked until take!(ch) is called
-            # This pause the reading of ostream until the current entry is treated
-            put!(ch, T(readavailable(ostream)))
-        end
-    end
-
-    # Read the channel asynchronously (one entry at a time) and call `newentry` on every entry
-    task_treat = @async begin
-        while isopen(ch)
+function realtime_readlines(ochan::Channel, newline_callback::Union{Function, Nothing})
+    if isnothing(newline_callback) return nothing; end
+    return @async begin
+        while isopen(ochan)
             # Blocks until a entry is avaible in the channel
             # Takes the entry and unlock the channel to be filled again
-            newentry(take!(ch))
+            out = take!(ochan)
+            # Apply `newline_callback` for each line found in the Channel entry
+            for l in split(out, '\n')
+                newline_callback(l)
+            end
         end
     end
-    # Note: Both taks will end when ostream is closed (externally by the process that opened it)
+    # Note, this task will finish whenever `ochan` is closed
 end
+
 
 """
     run(
         cmd::Base.AbstractCmd;
         windows_verbatim::Bool = false,
-        new_in::Union{Function, Nothing} = nothing,
-        new_out::Union{Function, Nothing} = nothing,
-        new_err::Union{Function, Nothing} = nothing
+        windows_hide::Bool = false,
+        dir::AbstractString = "",
+        env = nothing,
+        newline_out::Union{Function, Nothing} = nothing,
+        newline_err::Union{Function, Nothing} = nothing
     )
 
 Run a `Cmd` object sequentially in a separate process.
@@ -112,9 +128,8 @@ Run a `Cmd` object sequentially in a separate process.
   elements, use [`addenv()`](@ref) which will return a `Cmd` object with the updated environment.
 * `dir::AbstractString`: Specify a working directory for the command (instead
   of the current directory).
-* `handle_instream::Union{Function, Nothing}`: Callback that will be called for each new entry avaible in the separate process `stdin`
-* `handle_outstream::Union{Function, Nothing}`: Callback that will be called for each new entry avaible in the separate process `stdout`
-* `handle_errstream::Union{Function, Nothing}`: Callback that will be called for each new entry avaible in the separate process `stder`
+* `newline_out::Union{Function, Nothing}`: Callback that will be called for each new `stdout` lines created by the separate process.
+* `newline_err::Union{Function, Nothing}`: Callback that will be called for each new `stderr` lines created by the separate process.
 
 For any keywords that are not specified, the current settings from `cmd` are used. Normally,
 to create a `Cmd` object in the first place, one uses backticks, e.g.
@@ -125,105 +140,94 @@ function run(
     windows_hide::Bool = false,
     dir::AbstractString = "",
     env = nothing,
-    handle_instream::Union{Function, Nothing} = nothing,
-    handle_outstream::Union{Function, Nothing} = nothing,
-    handle_errstream::Union{Function, Nothing} = nothing
+    newline_out::Union{Function, Nothing} = nothing,
+    newline_err::Union{Function, Nothing} = nothing
 )
-
-    # Open the different communication pipes
-    pipe_in = isnothing(handle_instream) ? nothing : Base.BufferStream()
-    pipe_out = isnothing(handle_outstream) ? nothing : Base.BufferStream()
-    pipe_err = isnothing(handle_errstream) ? nothing : Base.BufferStream()
-
-    # Construct the pipeline with our custom pipes
-    pipeline = Base.pipeline(
-        Base.Cmd(
-            cmd; 
-            # Do not throw Exception with the process finish with non-zero status code (ignorestatus = true)
-            # As we are doing everything asynchronously
-            ignorestatus = true,
-            # Do not detach as this method `run` can be wrapped in a Yask
-            detach = false, 
-            windows_verbatim = windows_verbatim,
-            windows_hide = windows_hide,
-            env = env,
-            dir = dir
-        ),
-        # Redirect standart in,out and err of the new process to our custom pipes
-        stdin = pipe_in,
-        stdout = pipe_out,
-        stderr = pipe_err,
-        # Do not append as file redirection is not handled here with this system
-        append = false
+    # Launch the process in the background
+    proc, chin, chout, cherr = run_background(cmd;
+        windows_verbatim = windows_verbatim,
+        windows_hide = windows_hide,
+        dir = dir,
+        env = env
     )
 
-    # Launch the task to handle the pipes (IO) that will be filled by Base.run
-    task_in = nothing # Not supported yet
-    task_out = isnothing(handle_outstream) ? nothing : @async realtime_read(pipe_out, String; newentry = handle_outstream)
-    task_err = isnothing(handle_errstream) ? nothing : @async realtime_read(pipe_err, String; newentry = handle_errstream)
+    task_in = nothing # Not needed here
+    task_out = realtime_readlines(chout, newline_out)
+    task_err = realtime_readlines(cherr, newline_err)
 
-    # Launch the command asynchronously in a separate process
-    # Otherwise Base.run will read the whole content of stdout in one go and close the pipes
-    process = Base.run(pipeline, wait = false)
-
-    # Wait for the process to finische
-    # When over, it will close all the pipes (pipe_in; pipe_out and pipe_err)
-    # Thus terminating all the two subtasks of task_in, task_out and task_err
-    wait(process)
-
-    # All tasks (task_in, task_out and task_err) are no over from here (and do not return anything)
-    # Wait, for good measure !
+    # Wait for the process to finish
+    wait(proc)
+    # Wait for the handling tasks to finish
     fetch(task_in); fetch(task_out); fetch(task_err)
 
-    # Return the launched (and finished) process (usefull to get error code)
-    return process
+    return proc
 end
 
-function run(
-    cmd::Base.AbstractCmd,
-    session::AbstractSession;
-    handle_instream::Union{Function, Nothing} = nothing,
-    handle_outstream::Union{Function, Nothing} = nothing,
-    handle_errstream::Union{Function, Nothing} = nothing
-)
-    CommandLine.run(
-        format(session, cmd);
-        windows_verbatim = iswindows(session),
-        windows_hide = false,
-        dir = string(pwd(session)),
-        env = env(session),
-        handle_instream = handle_instream,
-        handle_outstream = handle_outstream,
-        handle_errstream = handle_errstream
-    )
-end
 
 """
-    checkoutput(session::AbstractSession, cmd::Base.AbstractCmd)
-Calls `CommandLine.run` and returns the whole standart output in a `String`.
-If the call fails, the standart err is outputed as a `String` is a raised Exception.
+Should define
+* `iswindows(::AbstractSession)`
+* `pwd(::AbstractSession)`; `string(pwd(s))` must be defined
+* `env(::AbstractSession)`
+* `open(::AbstractSession)`
+* `newline_out(::Union{Function, Nothing})`
+* `newline_err(::Union{Function, Nothing})`
 """
-function checkoutput(cmd::Base.AbstractCmd, session::AbstractSession)
-    out, err = "", ""
-    process = CommandLine.run(cmd, session;
-        handle_outstream = x::String -> out = out * x,
-        handle_errstream = x::String -> err = err * x
-    )
-    if process.exitcode != 0
-        throw(Base.IOError("$err", process.exitcode))
-    end
+abstract type AbstractSession end
+abstract type BashSession <: AbstractSession end
 
-    return out
+# As session.chin is a channel os size 1
+# Consecutive calls to `run` is blocking until
+function run(cmd::AbstractString, session::BashSession) 
+    put!(session.chin, cmd)
 end
 
-function showoutput(cmd::Base.AbstractCmd, session::AbstractSession)
-    err = ""
-    println("$(cmd)")
-    process = CommandLine.run(cmd, session;
-        handle_outstream = x::String -> print(x),
-        handle_errstream = x::String -> (print(x); err = err * x)
-    )
-    if process.exitcode != 0
-        throw(Base.IOError("$err", process.exitcode))
+struct LocalBashSession <: BashSession
+    pwd
+    env
+
+    bashproc::Base.Process
+    chin::Base.Channel
+    chout::Base.Channel
+    cherr::Base.Channel
+
+    task_out::Task
+    task_err::Task
+
+    function LocalBashSession(; pwd = Base.pwd(), env = nothing)
+        bashcmd::Base.Cmd = Sys.iswindows() ? `cmd /C bash` : `bash`
+        # Launch the internal bash process in the background
+        bashproc, chin, chout, cherr = run_background(bashcmd;
+            windows_verbatim = Sys.iswindows(),
+            windows_hide = false,
+            dir = string(pwd),
+            env = env,
+        )
+
+        # Launch stream handling tasks
+        task_out = realtime_readlines(chout, x -> println(x))
+        task_err = realtime_readlines(cherr, x -> println(x))
+
+        return new(pwd, env, bashproc, chin, chout, cherr, task_out, task_err)
     end
 end
+
+function close(session::LocalBashSession)
+    # Send the exit signal to the bash process
+    run("exit", session)
+    # Buffering to make sure the process as process all its input in instream and as finished normally
+    while process_running(session.bashproc)
+        sleep(0.05)
+    end
+    # Wait for the process to finish (it should have processed the exist signal)
+    # Finishing the process closes its streams (in, out, err) and thus finished the treating task binded to the channels (chin, chout, cherr)
+    wait(session.bashproc)
+    # session.task_out and session.task_err will termiate as session.chout and session.cherr are now closed
+    @assert !isopen(session.chout)
+    @assert !isopen(session.cherr)
+end
+
+l = LocalBashSession()
+run("ls && sleep 5", l)
+run("ls", l)
+close(l)

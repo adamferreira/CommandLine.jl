@@ -1,4 +1,7 @@
+
+"""
 struct RemoteSSHSession <: AbstractSession 
+    # SSH configuration
     username::AbstractString
     hostname::AbstractString
 
@@ -7,8 +10,7 @@ struct RemoteSSHSession <: AbstractSession
     pwd
     # environment variables
     env
-end
 
-function format(session::RemoteSSHSession, cmd::Base.AbstractCmd)
-    return Base.Cmd(vcat(["cd $(pwd(session))", "&&", "ssh"], "\"", collect(cmd), "\""))
+    # Piping
 end
+"""
