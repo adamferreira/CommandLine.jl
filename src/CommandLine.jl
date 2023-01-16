@@ -27,11 +27,13 @@ export  AbstractSession,
         run, checkoutput, showoutput
 
 
-const DEFAULT_SESSION = LocalBashSession()
-default_session() = DEFAULT_SESSION
-export default_session
-
+DEFAULT_SESSION = LocalBashSession()
 showoutput(cmd::AbstractString) = showoutput(cmd, DEFAULT_SESSION)
+macro run(cmd)
+    showoutput(cmd, DEFAULT_SESSION)
+end
+
+export default_session, @run
 
 # Precompile CommandLine package
 __precompile__()

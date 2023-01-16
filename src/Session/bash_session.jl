@@ -120,7 +120,7 @@ end
 
 function showoutput(cmd::AbstractString, session::AbstractSession)
     err = ""
-    println("$(cmd)")
+    println("\t$(cmd)")
     CommandLine.run(cmd, session;
         newline_out = x -> println(x),
         newline_err = x -> (print("Error: ",x); err = err * x)
