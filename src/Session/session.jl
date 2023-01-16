@@ -77,6 +77,47 @@ function run_background(
     return process, ch_in, ch_out, ch_err
 end
 
+
+function run_background2(
+    cmd::Base.AbstractCmd;
+    windows_verbatim::Bool = false,
+    windows_hide::Bool = false,
+    dir::AbstractString = "",
+    env = nothing
+)
+    # Open the different communication pipes
+    # Reading from a BufferStream blocks until data is available
+    pipe_in = Base.Pipe()
+    pipe_out = Base.BufferStream()
+    pipe_err = Base.BufferStream()
+
+    # Construct the pipeline with our custom pipes
+    pipeline = Base.pipeline(
+        Base.Cmd(
+            cmd; 
+            # Do not throw Exception when the process finish with non-zero status code (ignorestatus = true)
+            # As we are doing everything asynchronously
+            ignorestatus = true,
+            # Do not detach as this method `run` can be wrapped in a Yask
+            detach = false, 
+            windows_verbatim = windows_verbatim,
+            windows_hide = windows_hide,
+            env = env,
+            dir = dir
+        ),
+        # Redirect standart in, out and err of the new process to the custom pipes
+        stdin = pipe_in,
+        stdout = pipe_out,
+        stderr = pipe_err,
+        # Do not append as file redirection is not handled here with this system
+        append = false
+    )
+    # Start the backroung process
+    process = Base.run(pipeline; wait = false)
+
+    return process, pipe_in, pipe_out, pipe_err
+end
+
 function realtime_readlines(ochan::Channel, newline_callback::Union{Function, Nothing})
     if isnothing(newline_callback) return nothing; end
     return @async begin
@@ -176,10 +217,103 @@ Should define
 abstract type AbstractSession end
 abstract type BashSession <: AbstractSession end
 
-# As session.chin is a channel os size 1
-# Consecutive calls to `run` is blocking until
-function run(cmd::AbstractString, session::BashSession) 
-    put!(session.chin, cmd)
+
+# TODO : Make atomic
+# TODO : give ostream callbacks here
+"""
+function run2(cmd::AbstractString, session::BashSession)
+    # TODO : affect an id to the command
+    # An look for "task <id> done in the log"
+    done = false
+    
+    File Descriptor	 Abbreviation	Description
+    0	STDIN	Standard Input
+    1	STDOUT	Standard Output
+    2	STDERR	Standard Error
+    
+    put!(session.chin, cmd * "; (or ||) echo done 1>&2") # Redirect the echo to the program's stderr (more efficient to scrap than stdout)
+    t = @async begin
+        while !done:
+            # if done detected:
+            # add a third call back to look for completions
+            data = take!(session.chout)
+            if data == "task <id> done"
+                done = true
+            else
+                out_callback(data)
+    end
+end
+"""
+
+
+"""
+    ``
+Run the `cmd` command in the active bash session.
+This method is blocking and will return as soon a the command finished (success or error).
+"""
+function run(cmd::AbstractString, session::BashSession; newline_out::Union{Function, Nothing} = x -> println("INFO: ", x), newline_err::Union{Function, Nothing} = x -> println("ERROR: ", x))
+    # Lock this methos
+    lock(session.run_mutex)
+
+    # Begin the async master task to handle both stdout and stderr of the background bash process
+    master_task = @async begin
+        # Channel to communicate between the two subtasks (handle stdout and handle stderr)
+        ch_done = Channel(1)
+
+        # Launch stdout handle subtask
+        task_out = @async begin
+            while isopen(ch_done)
+                # Blocks until a entry is avaible in the channel
+                # Takes the entry and unlock the channel to be filled again
+                out = String(readavailable(session.chout))
+                for l in split(out, '\n')
+                    if length(l) == 0 continue; end
+                    newline_out(l)
+                end
+            end
+        end
+
+        # Launch stderr handle subtask
+        task_err = @async begin
+            done = false
+            while !done
+                # Blocks until a entry is avaible in the channel
+                # Takes the entry and unlock the channel to be filled again
+                out = String(readavailable(session.cherr))
+                for l in split(out, '\n')
+                    if length(l) == 0 continue; end
+                    # TODO: Optimize 
+                    if l == "done" 
+                        done = true
+                    else 
+                        newline_err(l)
+                    end
+                end
+
+            end
+            # Close the channel to notify `task_out` that it can stop the scrapping
+            Base.close(ch_done)
+        end
+
+        # Wait for the `done` signal from `cmd` 
+        wait(task_err)
+        # Now `task_err` is finished and `ch_done` is closed
+        # But `task_out` might get stuck in `readavailable` is now events appears in stdout anymore
+        # Trigger an output in stdout so that `task_out` detects the channel as closed
+        write(session.chin, "echo" * "\n")
+        # Wiat for the trigger to be processed
+        wait(task_out)
+        # The handling of stdout and stderr is now over !
+    end
+
+    # Submit commmand to the process's instream via the Channel
+    # Alter the command with a "done" signal
+    write(session.chin, cmd * " && echo done 1>&2" * "\n")
+    
+    # Wait for the master task to finish 
+    # this means stderr handling found the `done` signal and stdout handling stoped because the channel between them was closed
+    wait(master_task)
+    unlock(session.run_mutex)
 end
 
 struct LocalBashSession <: BashSession
@@ -187,34 +321,30 @@ struct LocalBashSession <: BashSession
     env
 
     bashproc::Base.Process
-    chin::Base.Channel
-    chout::Base.Channel
-    cherr::Base.Channel
-
-    task_out::Task
-    task_err::Task
+    chin
+    chout
+    cherr
+    run_mutex::Base.Threads.Condition
 
     function LocalBashSession(; pwd = Base.pwd(), env = nothing)
         bashcmd::Base.Cmd = Sys.iswindows() ? `cmd /C bash` : `bash`
         # Launch the internal bash process in the background
-        bashproc, chin, chout, cherr = run_background(bashcmd;
+        bashproc, chin, chout, cherr = run_background2(bashcmd;
             windows_verbatim = Sys.iswindows(),
             windows_hide = false,
             dir = string(pwd),
             env = env,
         )
 
-        # Launch stream handling tasks
-        task_out = realtime_readlines(chout, x -> println(x))
-        task_err = realtime_readlines(cherr, x -> println(x))
-
-        return new(pwd, env, bashproc, chin, chout, cherr, task_out, task_err)
+        return new(pwd, env, bashproc, chin, chout, cherr, Base.Threads.Condition())
     end
 end
 
 function close(session::LocalBashSession)
-    # Send the exit signal to the bash process
-    run("exit", session)
+    lock(session.run_mutex)
+    println("Calling close")
+    # Send the exit signal to the bash process (Do not call `run` here as we will never get the `done` signal)
+    write(session.chin, "exit \n")
     # Buffering to make sure the process as process all its input in instream and as finished normally
     while process_running(session.bashproc)
         sleep(0.05)
@@ -225,9 +355,11 @@ function close(session::LocalBashSession)
     # session.task_out and session.task_err will termiate as session.chout and session.cherr are now closed
     @assert !isopen(session.chout)
     @assert !isopen(session.cherr)
+    unlock(session.run_mutex)
 end
 
-l = LocalBashSession()
-run("ls && sleep 5", l)
-run("ls", l)
+@time l = LocalBashSession()
+@time run("ls", l)
+println("Cmd 1 over")
+@time run("ls", l)
 close(l)
