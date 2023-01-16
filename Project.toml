@@ -3,9 +3,6 @@ uuid = "b5bac2b0-583b-4e48-892f-005a2a7cf04f"
 authors = ["Adam Ferreira"]
 version = "0.0.1"
 
-[deps]
-FilePaths = "8fc22ac5-c921-52a6-82fd-178b2807b824"
-
 [compat]
 julia = "1.6"
 

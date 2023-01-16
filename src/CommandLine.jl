@@ -17,16 +17,21 @@ Alternatively Julia can be run inside a Posix environment such as Cygwin.
 
 import Base.:(==)
 
-include("path.jl")
-export  AbstractPath, PosixPath, WindowsPath,
-        segments, joinpath
+#include("path.jl")
+#export  AbstractPath, PosixPath, WindowsPath, segments, joinpath, @path, pathtype
 
 include("Session/session.jl")
-export  AbstractSession, LocalSession, LocalBashSession,
+export  AbstractSession,
+        BashSession,
+        LocalBashSession,
         run, checkoutput, showoutput
 
-include("System/system.jl")
-export @path, pathtype, ls
+
+const DEFAULT_SESSION = LocalBashSession()
+default_session() = DEFAULT_SESSION
+export default_session
+
+showoutput(cmd::AbstractString) = showoutput(cmd, DEFAULT_SESSION)
 
 # Precompile CommandLine package
 __precompile__()
