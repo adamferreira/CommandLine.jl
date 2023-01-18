@@ -167,3 +167,4 @@ Should define
 abstract type AbstractSession end
 
 include("bash_session.jl")
+include("ssh_session.jl")

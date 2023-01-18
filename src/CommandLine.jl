@@ -24,21 +24,38 @@ include("Session/session.jl")
 export  AbstractSession,
         BashSession,
         LocalBashSession,
-        run, checkoutput, showoutput
+        RemoteSSHSession,
+        close,
+        run, checkoutput, stringoutput, showoutput
+
+include("System/bash_commands.jl")
+export  isadir, isfile, islink, isexe, abspath, pwd,
+        ls
 
 
-        
+# Global default session is a local bash session
+# `bash` must exist on the local machine !
 DEFAULT_SESSION = nothing
-macro run(cmd)
-    showoutput(cmd, DEFAULT_SESSION)
+default_session() = DEFAULT_SESSION
+
+# Forward Bash calls with default sesstion
+for fct in Symbol[
+    :checkoutput,
+    :showoutput,
+    :stringoutput
+]
+    @eval $(fct)(cmd::AbstractString) = $(fct)(cmd, default_session())
 end
 
-showoutput(cmd::AbstractString) = showoutput(cmd, DEFAULT_SESSION)
+# Utilitaries macros and exports
+macro run(cmd)
+    showoutput(cmd, default_session())
+end
+export @run, default_session
 
-export default_session, @run
-
+# Open local bash session when loading the package
 function __init__()
-    DEFAULT_SESSION = LocalBashSession()
+    global DEFAULT_SESSION = LocalBashSession()
 end
 
 # Precompile CommandLine package
