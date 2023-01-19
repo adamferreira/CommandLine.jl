@@ -1,6 +1,8 @@
 abstract type BashSession <: AbstractSession end
+CommandLine.isopen(session::BashSession) = Base.process_running(session.bashproc)
 
 """
+    run(cmd::AbstractString, session::BashSession; newline_out::Function, newline_err::Function) -> Int64
     * `cmd` Command to be launched in the bash session
     * `session` bash session
     * `newline_out::Union{Function, Nothing}`: Callback that will be called for each new `stdout` lines created by the separate process.
@@ -14,7 +16,7 @@ function run(cmd::AbstractString, session::BashSession; newline_out::Function, n
     lock(session.run_mutex)
 
     # Check if the background process is alive
-    if !process_running(session.bashproc)
+    if !CommandLine.isopen(session)
         @error "Session is closed"
         unlock(session.run_mutex)
         return
@@ -83,6 +85,7 @@ function run(cmd::AbstractString, session::BashSession; newline_out::Function, n
 
     # Submit commmand to the process's instream via the Channel
     # Alter the command with a "done" signal that also contains taskid and the previous command return code (given by `$?` in bash)
+    # As `cmd` and `echo done <taskid>` are two separate commands, `$?` gives back the return code of `cmd`
     write(session.instream, cmd * " ; echo \"done $(t_uuid) \$?\" 1>&2" * "\n")
     
     # Wait for the master task to finish 

@@ -11,10 +11,10 @@ joinpath(x, y...) = Base.join(vcat(x, [y...]), '/')
     isdir(path, s::BashSession) -> Bool
 The path `path` must define `string(path)`
 """
-isdir(path, s::BashSession=default_session()) = __check_path("-d", path, s)
-isfile(path, s::BashSession=default_session()) = __check_path("-f", path, s)
-islink(path, s::BashSession=default_session()) = __check_path("-L", path, s)
-isexe(path, s::BashSession=default_session()) = __check_path("-x", path, s)
+isdir(path; s::BashSession=default_session()) = __check_path("-d", path, s)
+isfile(path;, s::BashSession=default_session()) = __check_path("-f", path, s)
+islink(path; s::BashSession=default_session()) = __check_path("-L", path, s)
+isexe(path; s::BashSession=default_session()) = __check_path("-x", path, s)
 abspath(path; s::BashSession=default_session()) = CommandLine.stringoutput("realpath $(path)", s)
 pwd(s::BashSession=default_session()) = CommandLine.stringoutput("pwd", s)
 
