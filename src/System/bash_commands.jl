@@ -11,16 +11,28 @@ joinpath(x, y...) = Base.join(vcat(x, [y...]), '/')
     isdir(path, s::BashSession) -> Bool
 The path `path` must define `string(path)`
 """
-isdir(path; s::BashSession=default_session()) = __check_path("-d", path, s)
-isfile(path;, s::BashSession=default_session()) = __check_path("-f", path, s)
-islink(path; s::BashSession=default_session()) = __check_path("-L", path, s)
-isexe(path; s::BashSession=default_session()) = __check_path("-x", path, s)
-abspath(path; s::BashSession=default_session()) = CommandLine.stringoutput("realpath $(path)", s)
+isdir(path, s::BashSession=default_session()) = __check_path("-d", path, s)
+isfile(path, s::BashSession=default_session()) = __check_path("-f", path, s)
+islink(path, s::BashSession=default_session()) = __check_path("-L", path, s)
+isexe(path, s::BashSession=default_session()) = __check_path("-x", path, s)
+abspath(path, s::BashSession=default_session()) = CommandLine.stringoutput("realpath $(path)", s)
 pwd(s::BashSession=default_session()) = CommandLine.stringoutput("pwd", s)
+cd(path, s::BashSession=default_session()) = CommandLine.stringoutput("cd $(path)", s)
 
-function ls(path, args::AbstractString...; s::BashSession=default_session(), join::Bool=false)
+
+function rm(path, args::AbstractString...; session::BashSession=default_session())
     strargs = Base.join(vcat(args...), ' ')
-    paths = CommandLine.checkoutput("ls $(strargs) $(path)", s)
+    CommandLine.stringoutput("rm $(strargs) $(path)", session)
+end
+
+function ls(path, args::AbstractString...; session::BashSession=default_session(), join::Bool=false)
+    strargs = Base.join(vcat(args...), ' ')
+    paths = CommandLine.checkoutput("ls $(strargs) $(path)", session)
     join && return [CommandLine.joinpath(path,p) for p in paths]
     return paths
+end
+
+function mkdir(path, args::AbstractString...; session::BashSession=default_session())
+    strargs = Base.join(vcat(args...), ' ')
+    CommandLine.stringoutput("mkdir $(strargs) $(path)", session)
 end

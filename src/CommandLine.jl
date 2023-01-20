@@ -30,7 +30,7 @@ export  AbstractSession,
 
 include("System/bash_commands.jl")
 export  isadir, isfile, islink, isexe, abspath, pwd,
-        ls
+        cd, ls, rm, mkdir
 
 
 # Global default session is a local bash session
