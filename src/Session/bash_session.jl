@@ -124,6 +124,7 @@ Calls `CommandLine.run` and returns the whole standart output in a Vector of `St
 If the call fails, the standart err is outputed as a `String` is a raised Exception.
 """
 function checkoutput(cmd::AbstractString, session::AbstractSession)
+    # TODO: Should it throw ?
     out = Vector{String}()
     err = ""
     status = CommandLine.run(cmd, session;

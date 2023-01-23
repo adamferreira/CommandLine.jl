@@ -20,19 +20,19 @@ pwd(s::BashSession=default_session()) = CommandLine.stringoutput("pwd", s)
 cd(path, s::BashSession=default_session()) = CommandLine.stringoutput("cd $(path)", s)
 
 
-function rm(path, args::AbstractString...; session::BashSession=default_session())
+function rm(path, session::BashSession, args::AbstractString...)
     strargs = Base.join(vcat(args...), ' ')
     CommandLine.stringoutput("rm $(strargs) $(path)", session)
 end
 
-function ls(path, args::AbstractString...; session::BashSession=default_session(), join::Bool=false)
+function ls(path, session::BashSession, args::AbstractString...; join::Bool=false)
     strargs = Base.join(vcat(args...), ' ')
     paths = CommandLine.checkoutput("ls $(strargs) $(path)", session)
     join && return [CommandLine.joinpath(path,p) for p in paths]
     return paths
 end
 
-function mkdir(path, args::AbstractString...; session::BashSession=default_session())
+function mkdir(path, session::BashSession, args::AbstractString...)
     strargs = Base.join(vcat(args...), ' ')
     CommandLine.stringoutput("mkdir $(strargs) $(path)", session)
 end
