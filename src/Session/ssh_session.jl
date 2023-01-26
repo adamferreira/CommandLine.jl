@@ -32,7 +32,7 @@ mutable struct RemoteSSHSession <: BashSession
         end
 
         s = new(username, hostname, port, env, bashproc, instream, outstream, errstream, Base.Threads.Condition())
-        if !isdir(pwd, s)
+        if !CommandLine.isdir(s, pwd)
             throw(SystemError("Cannot find path pwd=$(pwd) on remote machine", -1))
         end
 

@@ -2,16 +2,16 @@ abstract type BashSession <: AbstractSession end
 CommandLine.isopen(session::BashSession) = Base.process_running(session.bashproc)
 
 """
-    run(cmd::AbstractString, session::BashSession; newline_out::Function, newline_err::Function) -> Int64
-    * `cmd` Command to be launched in the bash session
+    run(session::BashSession, cmd::AbstractString; newline_out::Function, newline_err::Function) -> Int64
     * `session` bash session
+    * `cmd` Command to be launched in the bash session
     * `newline_out::Union{Function, Nothing}`: Callback that will be called for each new `stdout` lines created by the separate process.
     * `newline_err::Union{Function, Nothing}`: Callback that will be called for each new `stderr` lines created by the separate process.
 Run the `cmd` command in the active bash session.
 This method is blocking and will return as soon a the command finished (success or error).
 Return the status of the launched command (given by bash variable `\$?`).
 """
-function run(cmd::AbstractString, session::BashSession; newline_out::Function, newline_err::Function)
+function run(session::BashSession, cmd::AbstractString; newline_out::Function, newline_err::Function)
     # Lock this methos
     lock(session.run_mutex)
 
@@ -123,11 +123,11 @@ end
 Calls `CommandLine.run` and returns the whole standart output in a Vector of `String`.
 If the call fails, the standart err is outputed as a `String` is a raised Exception.
 """
-function checkoutput(cmd::AbstractString, session::AbstractSession)
+function checkoutput(session::AbstractSession, cmd::AbstractString)
     # TODO: Should it throw ?
     out = Vector{String}()
     err = ""
-    status = CommandLine.run(cmd, session;
+    status = CommandLine.run(session, cmd;
         newline_out = x -> push!(out, x),
         newline_err = x -> err = err * x
     )
@@ -135,9 +135,9 @@ function checkoutput(cmd::AbstractString, session::AbstractSession)
     return out
 end
 
-function stringoutput(cmd::AbstractString, session::AbstractSession)
+function stringoutput(session::AbstractSession, cmd::AbstractString)
     out, err = "", ""
-    status = CommandLine.run(cmd, session;
+    status = CommandLine.run(session, cmd;
         newline_out = x -> out = out * x,
         newline_err = x -> err = err * x
     )
@@ -146,10 +146,10 @@ function stringoutput(cmd::AbstractString, session::AbstractSession)
 end
 
 
-function showoutput(cmd::AbstractString, session::AbstractSession)
+function showoutput(session::AbstractSession, cmd::AbstractString)
     err = ""
     #println("\t$(cmd)")
-    status = CommandLine.run(cmd, session;
+    status = CommandLine.run(session, cmd;
         newline_out = x -> println(x),
         newline_err = x -> (print("Error: ",x); err = err * x)
     )

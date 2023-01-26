@@ -29,7 +29,7 @@ export  AbstractSession,
         run, checkoutput, stringoutput, showoutput
 
 include("System/bash_commands.jl")
-export  isadir, isfile, islink, isexe, abspath, pwd,
+export  isdir, isfile, islink, isexe, abspath, pwd,
         cd, ls, rm, mkdir
 
 
@@ -42,15 +42,26 @@ default_session() = DEFAULT_SESSION
 for fct in Symbol[
     :checkoutput,
     :showoutput,
-    :stringoutput
+    :stringoutput,
+    :isdir,
+    :isfile,
+    :islink,
+    :isexe,
+    :abspath,
+    :cd,
+    :ls,
+    :rm,
+    :mkdir,
 ]
-    @eval $(fct)(cmd::AbstractString) = $(fct)(cmd, default_session())
+@eval $(fct)(cmd, args...; kwargs...) = $(fct)(default_session(), cmd, args...; kwargs...)
 end
+
 
 # Utilitaries macros and exports
 macro run(cmd)
-    showoutput(cmd, default_session())
+    showoutput(default_session(), cmd)
 end
+
 export @run, default_session
 
 # Open local bash session when loading the package

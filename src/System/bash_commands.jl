@@ -1,38 +1,38 @@
 
 
 function __check_path(flag::AbstractString, path, s::BashSession)
-    out = CommandLine.stringoutput("if [[ $(flag) $(path) ]]; then echo \"true\"; else echo \"false\"; fi", s)
+    out = CommandLine.stringoutput(s, "if [[ $(flag) $(path) ]]; then echo \"true\"; else echo \"false\"; fi")
     return Base.parse(Bool, out)
 end
 
 joinpath(x, y...) = Base.join(vcat(x, [y...]), '/')
 
 """
-    isdir(path, s::BashSession) -> Bool
+    isdir(s::BashSession, path) -> Bool
 The path `path` must define `string(path)`
 """
-isdir(path, s::BashSession=default_session()) = __check_path("-d", path, s)
-isfile(path, s::BashSession=default_session()) = __check_path("-f", path, s)
-islink(path, s::BashSession=default_session()) = __check_path("-L", path, s)
-isexe(path, s::BashSession=default_session()) = __check_path("-x", path, s)
-abspath(path, s::BashSession=default_session()) = CommandLine.stringoutput("realpath $(path)", s)
-pwd(s::BashSession=default_session()) = CommandLine.stringoutput("pwd", s)
-cd(path, s::BashSession=default_session()) = CommandLine.stringoutput("cd $(path)", s)
+isdir(s::BashSession, path) = __check_path("-d", path, s)
+isfile(s::BashSession, path) = __check_path("-f", path, s)
+islink(s::BashSession, path) = __check_path("-L", path, s)
+isexe(s::BashSession, path) = __check_path("-x", path, s)
+abspath(s::BashSession, path) = CommandLine.stringoutput(s, "realpath $(path)")
+pwd(s::BashSession) = CommandLine.stringoutput(s, "pwd")
+cd(s::BashSession, path) = CommandLine.stringoutput(s, "cd $(path)")
 
 
-function rm(path, session::BashSession, args::AbstractString...)
+function rm(session::BashSession, path, args::AbstractString...)
     strargs = Base.join(vcat(args...), ' ')
-    CommandLine.stringoutput("rm $(strargs) $(path)", session)
+    CommandLine.stringoutput(session, "rm $(strargs) $(path)")
 end
 
-function ls(path, session::BashSession, args::AbstractString...; join::Bool=false)
+function ls(session::BashSession, path, args::AbstractString...; join::Bool=false)
     strargs = Base.join(vcat(args...), ' ')
-    paths = CommandLine.checkoutput("ls $(strargs) $(path)", session)
+    paths = CommandLine.checkoutput(session, "ls $(strargs) $(path)")
     join && return [CommandLine.joinpath(path,p) for p in paths]
     return paths
 end
 
-function mkdir(path, session::BashSession, args::AbstractString...)
+function mkdir(session::BashSession, path, args::AbstractString...)
     strargs = Base.join(vcat(args...), ' ')
-    CommandLine.stringoutput("mkdir $(strargs) $(path)", session)
+    CommandLine.stringoutput(session, "mkdir $(strargs) $(path)")
 end
