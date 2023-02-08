@@ -157,7 +157,35 @@ function showoutput(session::AbstractSession, cmd::AbstractString)
 end
 
 
+function BashSessionCstr(session_type::Type{<:BashSession}, bashcmd::Base.Cmd, pwd, env, session_args...)
+    # Launch the internal bash process in the background
+    bashproc, instream, outstream, errstream = CommandLine.run_background(bashcmd;
+        windows_verbatim = Sys.iswindows(),
+        windows_hide = false,
+        dir = Base.pwd(), # This is a local dir here,
+        env = env,
+    )
+
+    # Check that the internal process is running
+    if !process_running(bashproc)
+        throw(SystemError("Cannot start the bash process $(bashcmd)", bashproc.exitcode))
+    end
+
+    # Create the Session object around the background bash process
+    s = session_type(env, bashproc, instream, outstream, errstream, Base.Threads.Condition(), session_args...)
+
+    # Activate custom working directory
+    # May throw if the path does not exist
+    CommandLine.cd(s, pwd)
+
+    # Define destructor for all BashSession subtypes (exiting the background bash program)
+    # This will be called by the GC
+    # DEFAULT_SESSION will be closed when exiting Julia
+    finalizer(CommandLine.close, s)
+end
+
 mutable struct LocalBashSession <: BashSession
+    # --- Base BashSession arguments ---
     # environment variables
     env
     # Bashgroung Bash process
@@ -169,7 +197,7 @@ mutable struct LocalBashSession <: BashSession
     # Mutex (TODO: remove ?)
     run_mutex::Base.Threads.Condition
 
-    function LocalBashSession(; pwd = Base.pwd(), env = nothing)
+    function LocalBashSession2(; pwd = Base.pwd(), env = nothing)
         bashcmd::Base.Cmd = Sys.iswindows() ? `cmd /C bash` : `bash`
         # Launch the internal bash process in the background
         bashproc, instream, outstream, errstream = CommandLine.run_background(bashcmd;
@@ -191,4 +219,15 @@ mutable struct LocalBashSession <: BashSession
         finalizer(CommandLine.close, s)
         return s
     end
+
+    # This Constructor is necessary for BashSessionCstr to correctly instantiate the object
+    function LocalBashSession(arg...)
+        return new(arg...)
+    end
+
+    function LocalBashSession(; pwd = "~", env = nothing)
+        bashcmd::Base.Cmd = Sys.iswindows() ? `cmd /C bash` : `bash`
+        return BashSessionCstr(LocalBashSession, bashcmd, pwd, env)
+    end
+
 end

@@ -30,7 +30,10 @@ export  AbstractSession,
 
 include("System/bash_commands.jl")
 export  isdir, isfile, islink, isexe, abspath, pwd,
-        cd, ls, rm, mkdir
+        cd, env, cp, ls, rm, mkdir, chmod
+
+include("System/transfer.jl")
+export  default_ssh_keys, scp1
 
 
 # Global default session is a local bash session
@@ -52,9 +55,11 @@ for fct in Symbol[
     :ls,
     :rm,
     :mkdir,
+    :chmod,
 ]
 @eval $(fct)(cmd, args...; kwargs...) = $(fct)(default_session(), cmd, args...; kwargs...)
 end
+# TODO: :env
 
 
 # Utilitaries macros and exports

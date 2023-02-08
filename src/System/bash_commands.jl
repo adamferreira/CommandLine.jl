@@ -18,11 +18,11 @@ isexe(s::BashSession, path) = __check_path("-x", path, s)
 abspath(s::BashSession, path) = CommandLine.stringoutput(s, "realpath $(path)")
 pwd(s::BashSession) = CommandLine.stringoutput(s, "pwd")
 cd(s::BashSession, path) = CommandLine.stringoutput(s, "cd $(path)")
+cp(s::BashSession, src, dest) = CommandLine.stringoutput(s, "cd $(scr) $(dest)")
 
 
-function rm(session::BashSession, path, args::AbstractString...)
-    strargs = Base.join(vcat(args...), ' ')
-    CommandLine.stringoutput(session, "rm $(strargs) $(path)")
+function env(session::BashSession)
+    return CommandLine.checkoutput(session, "env")
 end
 
 function ls(session::BashSession, path, args::AbstractString...; join::Bool=false)
@@ -32,7 +32,17 @@ function ls(session::BashSession, path, args::AbstractString...; join::Bool=fals
     return paths
 end
 
+function rm(session::BashSession, path, args::AbstractString...)
+    strargs = Base.join(vcat(args...), ' ')
+    CommandLine.stringoutput(session, "rm $(strargs) $(path)")
+end
+
 function mkdir(session::BashSession, path, args::AbstractString...)
     strargs = Base.join(vcat(args...), ' ')
     CommandLine.stringoutput(session, "mkdir $(strargs) $(path)")
+end
+
+function chmod(session::BashSession, path, args::AbstractString...)
+    strargs = Base.join(vcat(args...), ' ')
+    CommandLine.stringoutput(session, "chmod $(strargs) $(path)")
 end
