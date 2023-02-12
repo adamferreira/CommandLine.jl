@@ -56,21 +56,21 @@ mutable struct RemoteSSHSession <: BashSession
     end
 end
 
-function upload_command(s::RemoteSSHSession, src::AbstractString, dest::AbstractString; silent = true)::String
+function upload_command(s::RemoteSSHSession, srcs::AbstractString, dest::AbstractString; silent::Bool = true)::String
     flags = ""
     if silent
         flags = "-oLogLevel=ERROR -oUserKnownHostsFile=/dev/null -oStrictHostKeyChecking=no"
     end
     # Quotes if "src" is several files space separated
-    return "scp $(flags) -P $(s.port) \"$(src)\" $(s.username)@$(s.hostname):$(dest)"
+    return "scp $(flags) -P $(s.port) $(srcs) $(s.username)@$(s.hostname):$(dest)"
 end
 
 
-function download_command(s::RemoteSSHSession, src::AbstractString, dest::AbstractString; silent = true)::String
+function download_command(s::RemoteSSHSession, srcs::AbstractString, dest::AbstractString; silent::Bool = true)::String
     flags = ""
     if silent
         flags = "-oLogLevel=ERROR -oUserKnownHostsFile=/dev/null -oStrictHostKeyChecking=no"
     end
     # Quotes if "src" is several files space separated
-    return "scp $(flags) -P $(s.port) $(s.username)@$(s.hostname):\"$(src)\" $(dest)"
+    return "scp $(flags) -P $(s.port) $(s.username)@$(s.hostname):\"$(srcs)\" $(dest)"
 end

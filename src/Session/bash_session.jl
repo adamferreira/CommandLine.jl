@@ -112,6 +112,7 @@ function close(session::BashSession)
     # Wait for the process to finish (it should have processed the exist signal)
     # Finishing the process closes its streams (in, out, err) and thus finished the treating task binded to the channels (instream, outstream, errstream)
     wait(session.bashproc)
+    #close(session.instream); close(session.outstream); close(session.errstream);
     # session.task_out and session.task_err will termiate as session.outstream and session.errstream are now closed
     @assert !isopen(session.outstream)
     @assert !isopen(session.errstream)

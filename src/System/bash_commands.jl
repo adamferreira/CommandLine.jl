@@ -16,6 +16,7 @@ isfile(s::BashSession, path) = __check_path("-f", path, s)
 islink(s::BashSession, path) = __check_path("-L", path, s)
 isexe(s::BashSession, path) = __check_path("-x", path, s)
 abspath(s::BashSession, path) = CommandLine.stringoutput(s, "realpath $(path)")
+parent(s::BashSession, path) = CommandLine.stringoutput(s, "dirname $(path)")
 pwd(s::BashSession) = CommandLine.stringoutput(s, "pwd")
 cd(s::BashSession, path) = CommandLine.stringoutput(s, "cd $(path)")
 cp(s::BashSession, src, dest) = CommandLine.stringoutput(s, "cd $(scr) $(dest)")
@@ -28,7 +29,7 @@ end
 function ls(session::BashSession, path, args::AbstractString...; join::Bool=false)
     strargs = Base.join(vcat(args...), ' ')
     paths = CommandLine.checkoutput(session, "ls $(strargs) $(path)")
-    join && return [CommandLine.joinpath(path,p) for p in paths]
+    join && return CommandLine.joinpath.(path, paths)
     return paths
 end
 

@@ -29,11 +29,14 @@ export  AbstractSession,
         run, checkoutput, stringoutput, showoutput
 
 include("System/bash_commands.jl")
-export  isdir, isfile, islink, isexe, abspath, pwd,
+export  isdir, isfile, islink, isexe, abspath, parent, pwd,
         cd, env, cp, ls, rm, mkdir, chmod
 
 include("System/transfer.jl")
-export  default_ssh_keys, scp1
+export  default_ssh_keys, scp1, transfer_files
+
+include("System/git.jl")
+export  git_status, changes
 
 
 # Global default session is a local bash session
@@ -51,6 +54,7 @@ for fct in Symbol[
     :islink,
     :isexe,
     :abspath,
+    :parent,
     :cd,
     :ls,
     :rm,
