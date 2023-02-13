@@ -3,6 +3,9 @@ uuid = "b5bac2b0-583b-4e48-892f-005a2a7cf04f"
 authors = ["Adam Ferreira"]
 version = "0.0.1"
 
+[deps]
+FileWatching = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
+
 [compat]
 julia = "1.6"
 

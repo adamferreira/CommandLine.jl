@@ -36,7 +36,10 @@ include("System/transfer.jl")
 export  default_ssh_keys, scp1, transfer_files
 
 include("System/git.jl")
-export  git_status, changes
+export  git_status, changes, tracked_files
+
+include("System/file.jl")
+export  watch_files
 
 
 # Global default session is a local bash session

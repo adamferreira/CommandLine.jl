@@ -31,3 +31,13 @@ function changes_from(session::BashSession, path; git = "git", branch = "master"
     CommandLine.cd(session, "-")
     return [replace(line[2:end], '\t' => "") for line in lines if is_change(line)]
 end
+
+"""
+    Get all tracked files in branch `branch` of git repository `path` is session `session`
+"""
+function tracked_files(session::BashSession, path; git = "git", branch = "master")::Vector{String}
+    CommandLine.cd(session, path)
+    lines = CommandLine.checkoutput(session, "$(git) ls-tree --full-tree --name-only -r $(branch)")
+    CommandLine.cd(session, "-")
+    return lines
+end
