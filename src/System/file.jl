@@ -20,9 +20,7 @@ function watch_files(paths::Vector{String}, buffering::Int64 = 1)::Base.Channel
             end
         end
     end
-
     # All created subtasks will end when `file_changed` is closed
     __watch_file.(paths)
-
     return file_changed
 end

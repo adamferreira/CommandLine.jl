@@ -9,8 +9,6 @@ function scp1(from::BashSession, to::BashSession, from_paths::AbstractString, to
     return CommandLine.showoutput(from, cmd)
 end
 
-# git ls-tree -r master --name-only
-
 ### Upload
 function transfer_files(from::BashSession, to::RemoteSSHSession, from_paths::Vector{AbstractString}, to_dir::AbstractString)
     return CommandLine.scp1(from, to, Base.join(from_paths, ' '), to_dir)
