@@ -1,3 +1,4 @@
+# TODO: Make BashSession a concrete super type
 abstract type BashSession <: AbstractSession end
 CommandLine.isopen(session::BashSession) = Base.process_running(session.bashproc)
 
