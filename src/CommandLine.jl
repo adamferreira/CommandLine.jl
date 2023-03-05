@@ -22,11 +22,13 @@ import Base.:(==)
 
 include("Session/session.jl")
 export  AbstractSession,
+        AbstractBashSession,
         BashSession,
         LocalBashSession,
         RemoteSSHSession,
+        bashsession,
         close,
-        run, checkoutput, stringoutput, showoutput
+        runcmd, checkoutput, stringoutput, showoutput
 
 include("System/bash_commands.jl")
 export  isdir, isfile, islink, isexe, abspath, parent, pwd,

@@ -161,8 +161,7 @@ Should define
 * `pwd(::AbstractSession)`; `string(pwd(s))` must be defined
 * `env(::AbstractSession)`
 * `open(::AbstractSession)`
-* `newline_out(::Union{Function, Nothing})`
-* `newline_err(::Union{Function, Nothing})`
+* `close(::AbstractSession)`
 """
 abstract type AbstractSession end
 

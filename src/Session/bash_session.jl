@@ -1,9 +1,83 @@
 # TODO: Make BashSession a concrete super type
-abstract type BashSession <: AbstractSession end
+abstract type AbstractBashSession <: AbstractSession end
+
+# Default behavior is returning oneself
+function bashsession(s::AbstractBashSession)
+    return s
+end
+# ----------------------------------------
+"""
+    Class is made mutable so that finalizer can be called
+    To close the background process when an instance of BashSession is garbage collected
+"""
+mutable struct BashSession <: AbstractBashSession
+    # Underlying bash command command used to start `bashproc`
+    bashcmd::Base.Cmd
+    # environment variables
+    env
+    # Bashgroung Bash process
+    bashproc::Base.Process
+    # Communication streams to the background process
+    instream::Base.Pipe
+    outstream::Base.BufferStream
+    errstream::Base.BufferStream
+    # Mutex (TODO: remove ?)
+    run_mutex::Base.Threads.Condition
+
+    function BashSession(bashcmd::Base.Cmd; pwd = Base.pwd(), env = nothing)
+        # Launch the internal bash process in the background
+        bashproc, instream, outstream, errstream = CommandLine.run_background(bashcmd;
+            windows_verbatim = Sys.iswindows(),
+            windows_hide = false,
+            dir = Base.pwd(), # This is a local dir here
+            env = env,
+        )
+
+        # Check that the internal process is running
+        if !process_running(bashproc)
+            throw(SystemError("Cannot start the bash process $(bashcmd)", bashproc.exitcode))
+        end
+
+        # Create the Session object around the background bash process
+        s = new(bashcmd, env, bashproc, instream, outstream, errstream, Base.Threads.Condition())
+
+        # Activate custom working directory
+        # May throw if the path does not exist
+        CommandLine.cd(s, pwd)
+
+        # Define destructor for all BashSession subtypes (exiting the background bash program)
+        # This will be called by the GC
+        # DEFAULT_SESSION will be closed when exiting Julia
+        finalizer(CommandLine.close, s)
+    end
+end
+
 CommandLine.isopen(session::BashSession) = Base.process_running(session.bashproc)
+"""
+    `close(session::BashSession)`
+Closes the bash session `session` by sending it the `exit` signal.
+This method is blocking.
+"""
+function close(session::BashSession)
+    lock(session.run_mutex)
+    # Send the exit signal to the bash process (Do not call `run` here as we will never get the `done` signal)
+    write(session.instream, "exit \n")
+    # Buffering to make sure the process as processed all its inputs in instream and as finished normally
+    while process_running(session.bashproc)
+        sleep(0.05)
+    end
+    # Wait for the process to finish (it should have processed the exist signal)
+    # Finishing the process closes its streams (in, out, err) and thus finished the treating task binded to the channels (instream, outstream, errstream)
+    wait(session.bashproc)
+    #close(session.instream); close(session.outstream); close(session.errstream);
+    # session.task_out and session.task_err will termiate as session.outstream and session.errstream are now closed
+    @assert !isopen(session.outstream)
+    @assert !isopen(session.errstream)
+    unlock(session.run_mutex)
+end
 
 """
-    run(session::BashSession, cmd::AbstractString; newline_out::Function, newline_err::Function) -> Int64
+    runcmd(session::BashSession, cmd::AbstractString; newline_out::Function, newline_err::Function) -> Int64
     * `session` bash session
     * `cmd` Command to be launched in the bash session
     * `newline_out::Union{Function, Nothing}`: Callback that will be called for each new `stdout` lines created by the separate process.
@@ -12,7 +86,7 @@ Run the `cmd` command in the active bash session.
 This method is blocking and will return as soon a the command finished (success or error).
 Return the status of the launched command (given by bash variable `\$?`).
 """
-function run(session::BashSession, cmd::AbstractString; newline_out::Function, newline_err::Function)
+function runcmd(session::BashSession, cmd::AbstractString; newline_out::Function, newline_err::Function)
     # Lock this methos
     lock(session.run_mutex)
 
@@ -98,38 +172,18 @@ function run(session::BashSession, cmd::AbstractString; newline_out::Function, n
 end
 
 """
-    `close(session::BashSession)`
-Closes the bash session `session` by sending it the `exit` signal.
-This method is blocking.
-"""
-function close(session::BashSession)
-    lock(session.run_mutex)
-    # Send the exit signal to the bash process (Do not call `run` here as we will never get the `done` signal)
-    write(session.instream, "exit \n")
-    # Buffering to make sure the process as processed all its inputs in instream and as finished normally
-    while process_running(session.bashproc)
-        sleep(0.05)
-    end
-    # Wait for the process to finish (it should have processed the exist signal)
-    # Finishing the process closes its streams (in, out, err) and thus finished the treating task binded to the channels (instream, outstream, errstream)
-    wait(session.bashproc)
-    #close(session.instream); close(session.outstream); close(session.errstream);
-    # session.task_out and session.task_err will termiate as session.outstream and session.errstream are now closed
-    @assert !isopen(session.outstream)
-    @assert !isopen(session.errstream)
-    unlock(session.run_mutex)
-end
-
-"""
     checkoutput(cmd::AbstractString, session::AbstractSession)::Vector{String}
 Calls `CommandLine.run` and returns the whole standart output in a Vector of `String`.
 If the call fails, the standart err is outputed as a `String` is a raised Exception.
 """
-function checkoutput(session::AbstractSession, cmd::AbstractString)
+function checkoutput(session::AbstractBashSession, cmd::AbstractString)
     # TODO: Should it throw ?
     out = Vector{String}()
     err = ""
-    status = CommandLine.run(session, cmd;
+    status = CommandLine.runcmd(
+        # Forward session to call runcmd(BashSession)
+        bashsession(session),
+        cmd;
         newline_out = x -> push!(out, x),
         newline_err = x -> err = err * x
     )
@@ -137,9 +191,12 @@ function checkoutput(session::AbstractSession, cmd::AbstractString)
     return out
 end
 
-function stringoutput(session::AbstractSession, cmd::AbstractString)
+function stringoutput(session::AbstractBashSession, cmd::AbstractString)
     out, err = "", ""
-    status = CommandLine.run(session, cmd;
+    status = CommandLine.runcmd(
+        # Forward session to call runcmd(BashSession)
+        bashsession(session),
+        cmd;
         newline_out = x -> out = out * x,
         newline_err = x -> err = err * x
     )
@@ -147,89 +204,26 @@ function stringoutput(session::AbstractSession, cmd::AbstractString)
     return out
 end
 
-
-function showoutput(session::AbstractSession, cmd::AbstractString)
+function showoutput(session::AbstractBashSession, cmd::AbstractString)
     err = ""
-    #println("\t$(cmd)")
-    status = CommandLine.run(session, cmd;
+    status = CommandLine.runcmd(
+        # Forward session to call runcmd(BashSession)
+        bashsession(session),
+        cmd;
         newline_out = x -> println(x),
         newline_err = x -> (print("Error: ",x); err = err * x)
     )
     (status != 0) && throw(Base.IOError("$err", status))
 end
 
-
-function BashSessionCstr(session_type::Type{<:BashSession}, bashcmd::Base.Cmd, pwd, env, session_args...)
-    # Launch the internal bash process in the background
-    bashproc, instream, outstream, errstream = CommandLine.run_background(bashcmd;
-        windows_verbatim = Sys.iswindows(),
-        windows_hide = false,
-        dir = Base.pwd(), # This is a local dir here,
-        env = env,
-    )
-
-    # Check that the internal process is running
-    if !process_running(bashproc)
-        throw(SystemError("Cannot start the bash process $(bashcmd)", bashproc.exitcode))
-    end
-
-    # Create the Session object around the background bash process
-    s = session_type(env, bashproc, instream, outstream, errstream, Base.Threads.Condition(), session_args...)
-
-    # Activate custom working directory
-    # May throw if the path does not exist
-    CommandLine.cd(s, pwd)
-
-    # Define destructor for all BashSession subtypes (exiting the background bash program)
-    # This will be called by the GC
-    # DEFAULT_SESSION will be closed when exiting Julia
-    finalizer(CommandLine.close, s)
-end
-
-mutable struct LocalBashSession <: BashSession
-    # --- Base BashSession arguments ---
-    # environment variables
-    env
-    # Bashgroung Bash process
-    bashproc::Base.Process
-    # Communication streams to the background process
-    instream::Base.Pipe
-    outstream::Base.BufferStream
-    errstream::Base.BufferStream
-    # Mutex (TODO: remove ?)
-    run_mutex::Base.Threads.Condition
-
-    function LocalBashSession2(; pwd = Base.pwd(), env = nothing)
-        bashcmd::Base.Cmd = Sys.iswindows() ? `cmd /C bash` : `bash`
-        # Launch the internal bash process in the background
-        bashproc, instream, outstream, errstream = CommandLine.run_background(bashcmd;
-            windows_verbatim = Sys.iswindows(),
-            windows_hide = false,
-            dir = string(pwd),
-            env = env,
-        )
-
-        if !process_running(bashproc)
-            throw(SystemError("Cannot start the bash process", bashproc.exitcode))
-        end
-
-        s = new(env, bashproc, instream, outstream, errstream, Base.Threads.Condition())
-
-        # Define destructor for LocalBashSession (exiting the background bash program)
-        # This will be called by the GC
-        # DEFAULT_SESSION will be closed when exiting Julia
-        finalizer(CommandLine.close, s)
-        return s
-    end
-
-    # This Constructor is necessary for BashSessionCstr to correctly instantiate the object
-    function LocalBashSession(arg...)
-        return new(arg...)
-    end
+mutable struct LocalBashSession <: CommandLine.AbstractBashSession
+    bashsession::CommandLine.BashSession
 
     function LocalBashSession(; pwd = "~", env = nothing)
         bashcmd::Base.Cmd = Sys.iswindows() ? `cmd /C bash` : `bash`
-        return BashSessionCstr(LocalBashSession, bashcmd, pwd, env)
+        return new(CommandLine.BashSession(bashcmd; pwd=pwd, env=env))
     end
-
 end
+
+# Forward session so it can be used the same as a BashSession
+CommandLine.bashsession(s::LocalBashSession) = s.bashsession
