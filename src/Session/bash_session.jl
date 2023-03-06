@@ -226,4 +226,5 @@ mutable struct LocalBashSession <: CommandLine.AbstractBashSession
 end
 
 # Forward session so it can be used the same as a BashSession
+# For example stringoutput(s::LocalBashSession) will call runcmd(s.bashsession)
 CommandLine.bashsession(s::LocalBashSession) = s.bashsession
