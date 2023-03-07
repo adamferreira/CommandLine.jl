@@ -27,6 +27,7 @@ export  AbstractSession,
         LocalBashSession,
         RemoteSSHSession,
         bashsession,
+        iswindows,
         close,
         runcmd, checkoutput, stringoutput, showoutput
 

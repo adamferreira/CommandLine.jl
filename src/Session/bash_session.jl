@@ -5,6 +5,11 @@ abstract type AbstractBashSession <: AbstractSession end
 function bashsession(s::AbstractBashSession)
     return s
 end
+
+# Default iswindows checking is done locally
+function iswindows(s::AbstractBashSession)::Bool
+    return Sys.iswindows()
+end
 # ----------------------------------------
 """
     Class is made mutable so that finalizer can be called
@@ -161,6 +166,7 @@ function runcmd(session::BashSession, cmd::AbstractString; newline_out::Function
     # Submit commmand to the process's instream via the Channel
     # Alter the command with a "done" signal that also contains taskid and the previous command return code (given by `$?` in bash)
     # As `cmd` and `echo done <taskid>` are two separate commands, `$?` gives back the return code of `cmd`
+    # TODO: add `$!` to get the pid of the last command !
     write(session.instream, cmd * " ; echo \"done $(t_uuid) \$?\" 1>&2" * "\n")
     
     # Wait for the master task to finish 
@@ -211,7 +217,7 @@ function showoutput(session::AbstractBashSession, cmd::AbstractString)
         bashsession(session),
         cmd;
         newline_out = x -> println(x),
-        newline_err = x -> (print("Error: ",x); err = err * x)
+        newline_err = x -> (println("Error: ",x); err = err * x)
     )
     (status != 0) && throw(Base.IOError("$err", status))
 end

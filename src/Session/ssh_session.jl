@@ -19,6 +19,7 @@ end
 
 # Forward session so it can be used the same as a BashSession
 CommandLine.bashsession(s::RemoteSSHSession) = s.bashsession
+CommandLine.iswindows(s::RemoteSSHSession)::Bool = false
 
 function upload_command(s::RemoteSSHSession, srcs::AbstractString, dest::AbstractString; silent::Bool = true)::String
     flags = ""
