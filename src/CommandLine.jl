@@ -28,6 +28,8 @@ export  AbstractSession,
         RemoteSSHSession,
         bashsession,
         iswindows,
+        indir,
+        |>,
         close,
         runcmd, checkoutput, stringoutput, showoutput
 

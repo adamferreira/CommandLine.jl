@@ -1,15 +1,3 @@
-# TODO: Make BashSession a concrete super type
-abstract type AbstractBashSession <: AbstractSession end
-
-# Default behavior is returning oneself
-function bashsession(s::AbstractBashSession)
-    return s
-end
-
-# Default iswindows checking is done locally
-function iswindows(s::AbstractBashSession)::Bool
-    return Sys.iswindows()
-end
 # ----------------------------------------
 """
     Class is made mutable so that finalizer can be called
@@ -175,51 +163,6 @@ function runcmd(session::BashSession, cmd::AbstractString; newline_out::Function
     unlock(session.run_mutex)
     # Return the status of the command
     return status
-end
-
-"""
-    checkoutput(cmd::AbstractString, session::AbstractSession)::Vector{String}
-Calls `CommandLine.run` and returns the whole standart output in a Vector of `String`.
-If the call fails, the standart err is outputed as a `String` is a raised Exception.
-"""
-function checkoutput(session::AbstractBashSession, cmd::AbstractString)
-    # TODO: Should it throw ?
-    out = Vector{String}()
-    err = ""
-    status = CommandLine.runcmd(
-        # Forward session to call runcmd(BashSession)
-        bashsession(session),
-        cmd;
-        newline_out = x -> push!(out, x),
-        newline_err = x -> err = err * x
-    )
-    (status != 0) && throw(Base.IOError("$err", status))
-    return out
-end
-
-function stringoutput(session::AbstractBashSession, cmd::AbstractString)
-    out, err = "", ""
-    status = CommandLine.runcmd(
-        # Forward session to call runcmd(BashSession)
-        bashsession(session),
-        cmd;
-        newline_out = x -> out = out * x,
-        newline_err = x -> err = err * x
-    )
-    (status != 0) && throw(Base.IOError("$err", status))
-    return out
-end
-
-function showoutput(session::AbstractBashSession, cmd::AbstractString)
-    err = ""
-    status = CommandLine.runcmd(
-        # Forward session to call runcmd(BashSession)
-        bashsession(session),
-        cmd;
-        newline_out = x -> println(x),
-        newline_err = x -> (println("Error: ",x); err = err * x)
-    )
-    (status != 0) && throw(Base.IOError("$err", status))
 end
 
 mutable struct LocalBashSession <: CommandLine.AbstractBashSession

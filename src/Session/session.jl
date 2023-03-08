@@ -164,6 +164,97 @@ Should define
 * `close(::AbstractSession)`
 """
 abstract type AbstractSession end
+abstract type AbstractBashSession <: AbstractSession end
+
+# Default behavior is returning oneself
+function bashsession(s::AbstractBashSession)
+    return s
+end
+
+# Default iswindows checking is done locally
+function iswindows(s::AbstractBashSession)::Bool
+    return Sys.iswindows()
+end
+
+"""
+    checkoutput(cmd::AbstractString, session::AbstractSession)::Vector{String}
+Calls `CommandLine.run` and returns the whole standart output in a Vector of `String`.
+If the call fails, the standart err is outputed as a `String` is a raised Exception.
+"""
+function checkoutput(session::AbstractBashSession, cmd::AbstractString)
+    # TODO: Should it throw ?
+    out = Vector{String}()
+    err = ""
+    status = CommandLine.runcmd(
+        # Forward session to call runcmd(BashSession)
+        bashsession(session),
+        cmd;
+        newline_out = x -> push!(out, x),
+        newline_err = x -> err = err * x
+    )
+    (status != 0) && throw(Base.IOError("$err", status))
+    return out
+end
+
+function stringoutput(session::AbstractBashSession, cmd::AbstractString)
+    out, err = "", ""
+    status = CommandLine.runcmd(
+        # Forward session to call runcmd(BashSession)
+        bashsession(session),
+        cmd;
+        newline_out = x -> out = out * x,
+        newline_err = x -> err = err * x
+    )
+    (status != 0) && throw(Base.IOError("$err", status))
+    return out
+end
+
+function showoutput(session::AbstractBashSession, cmd::AbstractString)
+    err = ""
+    status = CommandLine.runcmd(
+        # Forward session to call runcmd(BashSession)
+        bashsession(session),
+        cmd;
+        newline_out = x -> println(x),
+        newline_err = x -> (println("Error: ",x); err = err * x)
+    )
+    (status != 0) && throw(Base.IOError("$err", status))
+end
+
+"""
+    `indir(body::Function, session::AbstractBashSession, dir::AbstractString; createdir::Bool = false)`
+Performs all operations in `body` on `session` inside the directly `dir`.
+Arg `createdir` creates `dir` if it does not exist in `session`.
+All instructions in `body` are assumed to run sequentially on `session`.
+After `body` is called, the session `session` goes back to its previous current directly.
+
+    indir(session, "~") do s
+        @assert pwd(s) == "~"
+    end
+"""
+function indir(body::Function, session::AbstractBashSession, dir::AbstractString; createdir::Bool = false)
+    if !isdir(session, dir) && createdir
+        mkdir(session, dir)
+    end
+    @assert isdir(session, dir)
+    cd(session, dir)
+    try
+        body(session)
+    finally
+        cd(session, "-")
+    end
+end
+
+#macro run_str(cmd, session)
+#    return :(showoutput(:($session), $cmd))
+#end
+"""
+Define pipe operator on `AbstractBashSession`.
+Calls the command `cmd` inside `session`.
+Usage:
+    "<cmd>" |> session
+"""
+Base.:(|>)(cmd::AbstractString, session::AbstractBashSession) = showoutput(session, cmd)
 
 include("bash_session.jl")
 include("ssh_session.jl")
