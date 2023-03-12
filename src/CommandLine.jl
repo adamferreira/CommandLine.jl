@@ -29,6 +29,7 @@ export  AbstractSession,
         bashsession,
         iswindows,
         indir,
+        run,
         |>,
         close,
         runcmd, checkoutput, stringoutput, showoutput

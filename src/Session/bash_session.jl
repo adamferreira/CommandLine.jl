@@ -14,10 +14,12 @@ mutable struct BashSession <: AbstractBashSession
     instream::Base.Pipe
     outstream::Base.BufferStream
     errstream::Base.BufferStream
+    # Default run callback for this session
+    run_callback::Function
     # Mutex (TODO: remove ?)
     run_mutex::Base.Threads.Condition
 
-    function BashSession(bashcmd::Base.Cmd; pwd = Base.pwd(), env = nothing)
+    function BashSession(bashcmd::Base.Cmd; pwd = Base.pwd(), env = nothing, run_callback = showoutput)
         # Launch the internal bash process in the background
         bashproc, instream, outstream, errstream = CommandLine.run_background(bashcmd;
             windows_verbatim = Sys.iswindows(),
@@ -32,7 +34,7 @@ mutable struct BashSession <: AbstractBashSession
         end
 
         # Create the Session object around the background bash process
-        s = new(bashcmd, env, bashproc, instream, outstream, errstream, Base.Threads.Condition())
+        s = new(bashcmd, env, bashproc, instream, outstream, errstream, run_callback, Base.Threads.Condition())
 
         # Activate custom working directory
         # May throw if the path does not exist
@@ -46,6 +48,11 @@ mutable struct BashSession <: AbstractBashSession
 end
 
 CommandLine.isopen(session::BashSession) = Base.process_running(session.bashproc)
+
+function run(session::BashSession, cmd::AbstractString)
+    return session.run_callback(session, cmd)
+end
+
 """
     `close(session::BashSession)`
 Closes the bash session `session` by sending it the `exit` signal.

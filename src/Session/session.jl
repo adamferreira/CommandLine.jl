@@ -222,6 +222,13 @@ function showoutput(session::AbstractBashSession, cmd::AbstractString)
 end
 
 """
+    Default run behavior
+"""
+function run(session::AbstractBashSession, cmd::AbstractString)
+    return run(bashsession(session), cmd)
+end
+
+"""
     `indir(body::Function, session::AbstractBashSession, dir::AbstractString; createdir::Bool = false)`
 Performs all operations in `body` on `session` inside the directly `dir`.
 Arg `createdir` creates `dir` if it does not exist in `session`.
@@ -248,13 +255,14 @@ end
 #macro run_str(cmd, session)
 #    return :(showoutput(:($session), $cmd))
 #end
+
 """
 Define pipe operator on `AbstractBashSession`.
 Calls the command `cmd` inside `session`.
 Usage:
     "<cmd>" |> session
 """
-Base.:(|>)(cmd::AbstractString, session::AbstractBashSession) = showoutput(session, cmd)
+Base.:(|>)(cmd::AbstractString, session::AbstractBashSession) = run(session, cmd)
 
 include("bash_session.jl")
 include("ssh_session.jl")
