@@ -8,3 +8,5 @@ struct Process <: AbstractProcess
         return new(prefix, session)
     end
 end
+
+# TODO: implement active process
