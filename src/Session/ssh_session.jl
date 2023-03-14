@@ -21,6 +21,16 @@ end
 CommandLine.bashsession(s::RemoteSSHSession) = s.bashsession
 CommandLine.iswindows(s::RemoteSSHSession)::Bool = false
 
+function clone(s::RemoteSSHSession)::RemoteSSHSession
+    return RemoteSSHSession(
+        s.username,
+        s.hostname,
+        s.port;
+        pwd = pwd(s),
+        env = s.bashsession.env
+    )
+end
+
 function upload_command(s::RemoteSSHSession, srcs::AbstractString, dest::AbstractString; silent::Bool = true)::String
     flags = ""
     if silent

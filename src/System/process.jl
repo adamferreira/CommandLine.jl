@@ -9,4 +9,19 @@ struct Process <: AbstractProcess
     end
 end
 
-# TODO: implement active process
+
+struct ActiveProcess <: AbstractProcess
+    running_session::AbstractBashSession
+    pids::Vector{UInt32}
+
+    function ActiveProcess(template::AbstractBashSession, cmd)
+        # Clone the template to run `cmd` inside the clone
+        clone = CommandLine.clone(template)
+        # Run `cmd` as a foreground process in the clone
+        CommandLine.stringoutput(clone, cmd)
+    end
+end
+
+
+# struct BackgroundProcess <: AbstractProcess
+# end

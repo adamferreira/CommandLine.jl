@@ -172,6 +172,15 @@ function runcmd(session::BashSession, cmd::AbstractString; newline_out::Function
     return status
 end
 
+function clone(s::BashSession)::BashSession
+    return BashSession(
+        s.bashcmd;
+        pwd = pwd(s),
+        env = s.env,
+        run_callback = s.run_callback
+    )
+end
+
 mutable struct LocalBashSession <: CommandLine.AbstractBashSession
     bashsession::CommandLine.BashSession
 
@@ -184,3 +193,10 @@ end
 # Forward session so it can be used the same as a BashSession
 # For example stringoutput(s::LocalBashSession) will call runcmd(s.bashsession)
 CommandLine.bashsession(s::LocalBashSession) = s.bashsession
+
+function clone(s::LocalBashSession)::LocalBashSession
+    return LocalBashSession(;
+        pwd = pwd(s),
+        env = s.bashsession.env
+    )
+end

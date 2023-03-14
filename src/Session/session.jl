@@ -177,6 +177,13 @@ function iswindows(s::AbstractBashSession)::Bool
 end
 
 """
+    Clone a session
+"""
+function clone(s::AbstractBashSession)::AbstractBashSession
+    return Nothing
+end
+
+"""
     checkoutput(cmd::AbstractString, session::AbstractSession)::Vector{String}
 Calls `CommandLine.run` and returns the whole standart output in a Vector of `String`.
 If the call fails, the standart err is outputed as a `String` is a raised Exception.
