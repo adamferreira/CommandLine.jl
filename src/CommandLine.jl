@@ -47,6 +47,9 @@ export  git_status, changes, tracked_files
 include("System/file.jl")
 export  watch_files
 
+include("System/process.jl")
+export  AbstractProcess, BackgroundProcess, kill
+
 
 # Global default session is a local bash session
 # `bash` must exist on the local machine !

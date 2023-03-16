@@ -161,7 +161,6 @@ function runcmd(session::BashSession, cmd::AbstractString; newline_out::Function
     # Submit commmand to the process's instream via the Channel
     # Alter the command with a "done" signal that also contains taskid and the previous command return code (given by `$?` in bash)
     # As `cmd` and `echo done <taskid>` are two separate commands, `$?` gives back the return code of `cmd`
-    # TODO: add `$!` to get the pid of the last command !
     write(session.instream, cmd * " ; echo \"done $(t_uuid) \$?\" 1>&2" * "\n")
     
     # Wait for the master task to finish 

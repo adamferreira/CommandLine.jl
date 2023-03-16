@@ -10,18 +10,30 @@ struct Process <: AbstractProcess
 end
 
 
-struct ActiveProcess <: AbstractProcess
-    running_session::AbstractBashSession
+struct BackgroundProcess <: AbstractProcess
+    background_session::AbstractBashSession
     pids::Vector{UInt32}
 
-    function ActiveProcess(template::AbstractBashSession, cmd)
-        # Clone the template to run `cmd` inside the clone
-        clone = CommandLine.clone(template)
-        # Run `cmd` as a foreground process in the clone
-        CommandLine.stringoutput(clone, cmd)
+    function BackgroundProcess(session::AbstractBashSession, cmd)
+        # Create the `run_background` macro in the session
+        # Raw strings do not perform interpolation
+        # `$!` gives the pid of the last command !
+        stringoutput(s, raw"run_background() { eval \"$@\" &>/dev/null & disown; echo $!; }")
+        strpids = checkoutput(s, "run_background \"$(cmd)\"")
+
+        # Note: BackgroundProcess needs to be killed with pkill -P <pid>
+        # To kill pid and all process that pid might spawn itself 
+        return new(s, parse.(UInt32, strpid))
     end
 end
 
+function kill(p::BackgroundProcess)
+    if length(p.pids) == 1
+        stringoutput(p.background_session, "pkill -P $(p.pids[1])")
+    else
+        stringoutput(p.background_session, "kill -SIGKILL " * join(p.pids, " "))
+    end
+end
 
 # struct BackgroundProcess <: AbstractProcess
 # end
