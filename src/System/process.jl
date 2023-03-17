@@ -34,6 +34,3 @@ function kill(p::BackgroundProcess)
         stringoutput(p.background_session, "kill -SIGKILL " * join(p.pids, " "))
     end
 end
-
-# struct BackgroundProcess <: AbstractProcess
-# end
