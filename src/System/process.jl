@@ -19,18 +19,14 @@ struct BackgroundProcess <: AbstractProcess
         # Raw strings do not perform interpolation
         # `$!` gives the pid of the last command !
         stringoutput(s, raw"run_background() { eval \"$@\" &>/dev/null & disown; echo $!; }")
-        strpids = checkoutput(s, "run_background \"$(cmd)\"")
+        strpid = stringoutput(s, "run_background \"$(cmd)\"")
 
         # Note: BackgroundProcess needs to be killed with pkill -P <pid>
         # To kill pid and all process that pid might spawn itself 
-        return new(s, parse.(UInt32, strpid))
+        return new(s, parse(UInt32, strpid))
     end
 end
 
 function kill(p::BackgroundProcess)
-    if length(p.pids) == 1
-        stringoutput(p.background_session, "pkill -P $(p.pids[1])")
-    else
-        stringoutput(p.background_session, "kill -SIGKILL " * join(p.pids, " "))
-    end
+    stringoutput(p.background_session, "pkill -P $(p.pid)")
 end
