@@ -12,18 +12,18 @@ end
 
 struct BackgroundProcess <: AbstractProcess
     background_session::AbstractBashSession
-    pids::Vector{UInt32}
+    pid::UInt32
 
     function BackgroundProcess(session::AbstractBashSession, cmd)
         # Create the `run_background` macro in the session
         # Raw strings do not perform interpolation
         # `$!` gives the pid of the last command !
-        stringoutput(s, raw"run_background() { eval \"$@\" &>/dev/null & disown; echo $!; }")
-        strpid = stringoutput(s, "run_background \"$(cmd)\"")
+        stringoutput(session, raw"run_background() { eval \"$@\" &>/dev/null & disown; echo $!; }")
+        strpid = stringoutput(session, "run_background \"$(cmd)\"")
 
         # Note: BackgroundProcess needs to be killed with pkill -P <pid>
         # To kill pid and all process that pid might spawn itself 
-        return new(s, parse(UInt32, strpid))
+        return new(session, parse(UInt32, strpid))
     end
 end
 
