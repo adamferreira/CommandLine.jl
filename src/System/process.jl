@@ -27,6 +27,7 @@ struct BackgroundProcess <: AbstractProcess
     end
 end
 
+
 function kill(p::BackgroundProcess)
     stringoutput(p.background_session, "pkill -P $(p.pid)")
 end
