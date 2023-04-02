@@ -75,7 +75,6 @@ for fct in Symbol[
 ]
 @eval $(fct)(cmd, args...; kwargs...) = $(fct)(default_session(), cmd, args...; kwargs...)
 end
-# TODO: :env
 
 
 # Utilitaries macros and exports
