@@ -259,9 +259,11 @@ function indir(body::Function, session::AbstractBashSession, dir::AbstractString
     end
 end
 
-#macro run_str(cmd, session)
-#    return :(showoutput(:($session), $cmd))
-#end
+macro run_str(scmd, sname)
+    return quote
+        
+    end
+end
 
 """
 Define pipe operator on `AbstractBashSession`.
