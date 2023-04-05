@@ -260,9 +260,8 @@ function indir(body::Function, session::AbstractBashSession, dir::AbstractString
 end
 
 macro run_str(scmd, sname)
-    return quote
-        
-    end
+    s = Meta.parse(sname)
+    return :(CommandLine.run($s, $scmd))
 end
 
 """
