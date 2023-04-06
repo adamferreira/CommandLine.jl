@@ -259,9 +259,19 @@ function indir(body::Function, session::AbstractBashSession, dir::AbstractString
     end
 end
 
-macro run_str(scmd, sname)
-    s = Meta.parse(sname)
+struct BashCommand 
+    cmd
+    session::AbstractBashSession
+end
+
+macro run_str(scmd, sess)
+    s = Meta.parse(sess)
     return :(CommandLine.run($s, $scmd))
+end
+
+macro c_str(scmd, sess)
+    s = Meta.parse(sess)
+    return :(CommandLine.BashCommand($scmd, $s))
 end
 
 """
