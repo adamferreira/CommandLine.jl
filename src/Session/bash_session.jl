@@ -87,7 +87,7 @@ This method is blocking and will return as soon a the command finished (success 
 Return the status of the launched command (given by bash variable `\$?`).
 """
 function runcmd(session::BashSession, cmd::AbstractString; newline_out::Function, newline_err::Function)
-    # Lock this methos
+    # Lock this method
     lock(session.run_mutex)
 
     # Check if the background process is alive
