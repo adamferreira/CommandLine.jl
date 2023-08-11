@@ -7,7 +7,7 @@ mutable struct BashSession <: AbstractBashSession
     # Underlying bash command command used to start `bashproc`
     bashcmd::Base.Cmd
     # environment variables
-    env
+    env::Union{Nothing,Dict{String,String}}
     # Bashgroung Bash process
     bashproc::Base.Process
     # Communication streams to the background process
@@ -21,7 +21,8 @@ mutable struct BashSession <: AbstractBashSession
 
     function BashSession(bashcmd::Base.Cmd; pwd = Base.pwd(), env = nothing, run_callback = showoutput)
         # Launch the internal bash process in the background
-        bashproc, instream, outstream, errstream = CommandLine.run_background(bashcmd;
+        bashproc, instream, outstream, errstream = CommandLine.run_background(
+            bashcmd;
             windows_verbatim = Sys.iswindows(),
             windows_hide = false,
             dir = Base.pwd(), # This is a local dir here
