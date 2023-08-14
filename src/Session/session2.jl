@@ -1,3 +1,6 @@
+# Transform a command to its instanciated string
+cmdstr(cmd::Base.Cmd) = join(cmd.exec," ")
+
 """
     run(
         cmd::Base.AbstractCmd;
@@ -83,10 +86,11 @@ Should define:
 abstract type AbstractSession end
 
 """
-    Session Type `ST` (Shell, Windows, ...)
+    Shell Type `ST` (Bash, shell, Powershell, ...)
 """
-abstract type SessionType end
-abstract type Shell <: SessionType end
+abstract type ShellType end
+abstract type Shell <: ShellType end # sh
+abstract type Bash <: ShellType end
 
 
 """
@@ -96,13 +100,13 @@ abstract type ConnectionType end
 abstract type Local <: ConnectionType end
 abstract type SSH <: ConnectionType end
 
-mutable struct Session{ST <: SessionType, CT <: ConnectionType} <: AbstractSession
+mutable struct Session{ST <: ShellType, CT <: ConnectionType} <: AbstractSession
     # Underlying command used to start `proc`
     cmd::Base.Cmd
     # environment variables
     env::Dict{String,String}
-    # Bashground process
-    proc::Base.Process
+    # Underlying interpretor (Shell,...) process
+    interproc::Base.Process
     # Communication streams to the background process
     instream::Base.Pipe
     outstream::Base.BufferStream
@@ -111,9 +115,9 @@ mutable struct Session{ST <: SessionType, CT <: ConnectionType} <: AbstractSessi
     run_mutex::Base.Threads.Condition
 
     # Default (Generic) constructor
-    function Session{ST,CT}(cmd::Base.Cmd; pwd = Base.pwd(), env = nothing) where {ST <: SessionType, CT <: ConnectionType}
+    function Session{ST,CT}(cmd::Base.Cmd; pwd = Base.pwd(), env = nothing) where {ST <: ShellType, CT <: ConnectionType}
         # Launch the internal process in the background
-        proc, instream, outstream, errstream = CommandLine.run_background(
+        interproc, instream, outstream, errstream = run_background(
             cmd;
             windows_verbatim = Sys.iswindows(),
             windows_hide = false,
@@ -122,27 +126,130 @@ mutable struct Session{ST <: SessionType, CT <: ConnectionType} <: AbstractSessi
         )
 
         # Check that the internal process is running
-        if !process_running(proc)
-            throw(SystemError("Cannot start the bash process $(cmd)", proc.exitcode))
+        if !process_running(interproc)
+            throw(SystemError("Cannot start the bash process $(cmd)", interproc.exitcode))
         end
 
         # Create the Session object around the background process
-        s = new(cmd, env, proc, instream, outstream, errstream, run_callback, Base.Threads.Condition())
+        s = new{ST,CT}(
+            cmd,
+            isnothing(env) ? Dict{String,String}() : env,
+            interproc,
+            instream,
+            outstream,
+            errstream,
+            Base.Threads.Condition()
+        )
 
         # Activate custom working directory
         # May throw if the path does not exist
-        CommandLine.cd(s, pwd)
+        #cd(s, pwd)
 
         # Define destructor for all Session subtypes (exiting the background bash program)
         # This will be called by the GC
         # DEFAULT_SESSION will be closed when exiting Julia
-        finalizer(CommandLine.close, s)
+        finalizer(close, s)
     end
 end
 
 """
+    run(session::BashSession, cmd::AbstractString; newline_out::Function, newline_err::Function) -> Int64
+    * `session` bash session
+    * `cmd` Command to be launched in the bash session
+    * `newline_out::Union{Function, Nothing}`: Callback that will be called for each new `stdout` lines created by the separate process.
+    * `newline_err::Union{Function, Nothing}`: Callback that will be called for each new `stderr` lines created by the separate process.
+Run the `cmd` command in the active bash session.
+This method is blocking and will return as soon a the command finished (success or error).
+Return the status of the launched command (given by bash variable `\$?`).
+"""
+function run(session::Session, cmd::Base.Cmd; newline_out::Function, newline_err::Function)
+    # Lock this method
+    lock(session.run_mutex)
+
+    # Check if the background process is alive
+    if !isopen(session)
+        @error "Session is closed"
+        unlock(session.run_mutex)
+        return
+    end
+
+    # Get current process hash to personnalize the `done` signal so it does not enter in conflics with normal error logs
+    t_uuid = current_task().rngState0
+
+    # Begin the async master task to handle both stdout and stderr of the background bash process
+    master_task = @async begin
+        # Channel to communicate between the two subtasks (handle stdout and handle stderr)
+        ch_done = Channel(1)
+
+        # Launch stdout handle subtask
+        task_out = @async begin
+            while Base.isopen(ch_done)
+                # Blocks until a entry is avaible in the channel
+                # Takes the entry and unlock the channel to be filled again
+                out = String(readavailable(session.outstream))
+                for l in split(out, '\n')
+                    if length(l) == 0 continue; end
+                    newline_out(l)
+                end
+            end
+        end
+
+        # Launch stderr handle subtask
+        task_err = @async begin
+            done = false
+            status = "-1"
+            while !done
+                # Blocks until a entry is avaible in the channel
+                # Takes the entry and unlock the channel to be filled again
+                out = String(readavailable(session.errstream))
+                for l in split(out, '\n')
+                    if length(l) == 0 continue; end
+                    # TODO: Optimize 
+                    if occursin("done $(t_uuid)" , l)
+                        done = true
+                        # Extract the command status from `done` signal
+                        r = findfirst("done $(t_uuid)" , l)
+                        status = l[r.stop+2:end]
+                    else 
+                        newline_err(l)
+                    end
+                end
+
+            end
+            # Close the channel to notify `task_out` that it can stop the scrapping
+            Base.close(ch_done)
+            return Base.parse(Int64, status)
+        end
+
+        # Wait for the `done` signal from `cmd` 
+        status = fetch(task_err)
+        # Now `task_err` is finished and `ch_done` is closed
+        # But `task_out` might get stuck in `readavailable` is now events appears in stdout anymore
+        # Trigger an output in stdout so that `task_out` detects the channel as closed
+        write(session.instream, "echo" * "\n")
+        # Wait for the trigger to be processed
+        wait(task_out)
+        # The handling of stdout and stderr is now over !
+        # Return the status of the command
+        return status
+    end
+
+    # Submit commmand to the process's instream via the Channel
+    # Alter the command with a "done" signal that also contains taskid and the previous command return code (given by `$?` in bash)
+    # As `cmd` and `echo done <taskid>` are two separate commands, `$?` gives back the return code of `cmd`
+    write(session.instream, cmdstr(cmd) * " ; echo \"done $(t_uuid) \$?\" 1>&2" * "\n")
+    
+    # Wait for the master task to finish 
+    # this means stderr handling found the `done` signal and stdout handling stoped because the channel between them was closed
+    status = fetch(master_task)
+    unlock(session.run_mutex)
+    # Return the status of the command
+    return status
+end
+
+"""
     `close(session::Session)`
-Closes `session` by sending the `exit` signal to its internal process `proc`.
+Closes `session` by sending the `exit` signal to its internal process `interproc`.
 This method is blocking.
 """
 function close(session::Session)
@@ -152,12 +259,12 @@ function close(session::Session)
     write(session.instream, "exit \n")
     # Buffering to make sure the process as processed all its inputs in instream and as finished normally
     # TODO: optimize ?
-    while process_running(session.proc)
+    while process_running(session.interproc)
         sleep(0.05)
     end
     # Wait for the process to finish (it should have processed the exist signal)
     # Finishing the process closes its streams (in, out, err) and thus finished the treating task binded to the channels (instream, outstream, errstream)
-    wait(session.proc)
+    wait(session.interproc)
     #close(session.instream); close(session.outstream); close(session.errstream);
     # session.task_out and session.task_err will termiate as session.outstream and session.errstream are now closed
     @assert !isopen(session.outstream)
@@ -166,11 +273,20 @@ function close(session::Session)
 end
 
 
-isopen(session::Session) = Base.process_running(session.proc)
+isopen(session::Session) = Base.process_running(session.interproc)
+
+# Specific constructors for each combination of ShellType and ConnectionType
+
+function Session{Bash, CT}(; pwd = "~", env = nothing) where {CT<:ConnectionType}
+    bashcmd::Base.Cmd = Sys.iswindows() ? `cmd /C bash` : `bash`
+    return Session{Bash,CT}(bashcmd; pwd=pwd, env=env)
+end
 
 # Type aliasing
-LocalShellSession = Session{Shell, Local}
-SSHSession = Session{Shell, SSH}
+LocalBashSession = Session{Bash, Local}
+SSHSession = Session{Bash, SSH}
 
 
-s = SSHSession()
+s = LocalBashSession()
+f = x -> println(x)
+run(s, `ls .`, newline_out=f,newline_err=f)
