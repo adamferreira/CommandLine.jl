@@ -1,6 +1,3 @@
-# Transform a command to its instanciated string
-cmdstr(cmd::Base.Cmd) = join(cmd.exec," ")
-
 """
     run(
         cmd::Base.AbstractCmd;
@@ -41,10 +38,10 @@ to create a `Cmd` object in the first place, one uses backticks, e.g.
 """
 function run_background(
     cmd::Base.AbstractCmd;
-    windows_verbatim::Bool = false,
-    windows_hide::Bool = false,
-    dir::AbstractString = "",
-    env = nothing
+    dir::String = Base.pwd(),
+    env::Dict{String,String} = copy(ENV),
+    windows_verbatim::Bool = Sys.iswindows(),
+    windows_hide::Bool = false
 )
     # Open the different communication pipes
     # Reading from a BufferStream blocks until data is available
@@ -59,7 +56,7 @@ function run_background(
             # Do not throw Exception when the process finish with non-zero status code (ignorestatus = true)
             # As we are doing everything asynchronously
             ignorestatus = true,
-            # Do not detach as this method `run` can be wrapped in a Yask
+            # Do not detach as this method `run` can be wrapped in a Task
             detach = false, 
             windows_verbatim = windows_verbatim,
             windows_hide = windows_hide,
@@ -75,7 +72,10 @@ function run_background(
     )
     # Start the backroung process
     process = Base.run(pipeline; wait = false)
-
+    # Set Process IO's as being the one we just openned
+    process.in = pipe_in
+    process.out = pipe_out
+    process.err = pipe_err
     return process, pipe_in, pipe_out, pipe_err
 end
 
@@ -91,6 +91,7 @@ abstract type AbstractSession end
 abstract type ShellType end
 abstract type Shell <: ShellType end # sh
 abstract type Bash <: ShellType end
+abstract type PowerShell <: ShellType end # Broken !
 
 
 """
@@ -115,7 +116,7 @@ mutable struct Session{ST <: ShellType, CT <: ConnectionType} <: AbstractSession
     run_mutex::Base.Threads.Condition
 
     # Default (Generic) constructor
-    function Session{ST,CT}(cmd::Base.Cmd; pwd = Base.pwd(), env = nothing) where {ST <: ShellType, CT <: ConnectionType}
+    function Session{ST,CT}(cmd::Base.Cmd; pwd = Base.pwd(), env = copy(ENV)) where {ST <: ShellType, CT <: ConnectionType}
         # Launch the internal process in the background
         interproc, instream, outstream, errstream = run_background(
             cmd;
@@ -151,6 +152,21 @@ mutable struct Session{ST <: ShellType, CT <: ConnectionType} <: AbstractSession
         finalizer(close, s)
     end
 end
+
+instream(s::Session) = s.interproc.in
+outstream(s::Session) = s.interproc.out
+errstream(s::Session) = s.interproc.err
+
+# Transform a command to its instanciated string
+cmdstr(cmd::Base.Cmd) = join(cmd.exec," ")
+# Get the last command return code
+@inline last_cmd_status_str(s::Session{PowerShell,CT}) where {CT <: ConnectionType} = "\$?"
+@inline last_cmd_status_str(s::Session{Shell,CT}) where {CT <: ConnectionType} = "\$?"
+@inline last_cmd_status_str(s::Session{Bash,CT}) where {CT <: ConnectionType} = "\$?"
+# Command to redirect a command's standart output to the error stream
+@inline redirect_stderr_str(s::Session{Shell,CT}) where {CT <: ConnectionType} = "1>&2"
+@inline redirect_stderr_str(s::Session{Bash,CT}) where {CT <: ConnectionType} = "1>&2"
+@inline redirect_stderr_str(s::Session{PowerShell,CT}) where {CT <: ConnectionType} = "1>2"
 
 """
     run(session::BashSession, cmd::AbstractString; newline_out::Function, newline_err::Function) -> Int64
@@ -237,7 +253,8 @@ function run(session::Session, cmd::Base.Cmd; newline_out::Function, newline_err
     # Submit commmand to the process's instream via the Channel
     # Alter the command with a "done" signal that also contains taskid and the previous command return code (given by `$?` in bash)
     # As `cmd` and `echo done <taskid>` are two separate commands, `$?` gives back the return code of `cmd`
-    write(session.instream, cmdstr(cmd) * " ; echo \"done $(t_uuid) \$?\" 1>&2" * "\n")
+    # Use `1>&2` to redirect the 'done' signe to the error stream (faster than parsing standart stream)
+    write(session.instream, cmdstr(cmd) * " ; echo \"done $(t_uuid) $(last_cmd_status_str(session))\" $(redirect_stderr_str(session))" * "\n")
     
     # Wait for the master task to finish 
     # this means stderr handling found the `done` signal and stdout handling stoped because the channel between them was closed
@@ -275,18 +292,31 @@ end
 
 isopen(session::Session) = Base.process_running(session.interproc)
 
-# Specific constructors for each combination of ShellType and ConnectionType
-
-function Session{Bash, CT}(; pwd = "~", env = nothing) where {CT<:ConnectionType}
+"""
+Specific constructors for each combination of ShellType and ConnectionType
+"""
+# Bash Session (bash must be available on the machine)
+function Session{Bash, CT}(; pwd = "~", env = copy(ENV)) where {CT<:ConnectionType}
     bashcmd::Base.Cmd = Sys.iswindows() ? `cmd /C bash` : `bash`
     return Session{Bash,CT}(bashcmd; pwd=pwd, env=env)
 end
 
-# Type aliasing
+function Session{PowerShell, CT}(; pwd = "~", env = copy(ENV)) where {CT<:ConnectionType}
+    Sys.iswindows() || @error "Can only instanciate PowerShell session in Windows environments"
+    # -NoLogo is to prevent the welcome header from appearing
+    return Session{PowerShell,CT}(`powershell -NoLogo`; pwd=pwd, env=env)
+
+end
+
+"""
+Type aliasing
+"""
 LocalBashSession = Session{Bash, Local}
 SSHSession = Session{Bash, SSH}
 
 
-s = LocalBashSession()
+s = LocalBashSession(; pwd = ".")
 f = x -> println(x)
-run(s, `ls .`, newline_out=f,newline_err=f)
+status = run(s, `ls .`, newline_out=f,newline_err=f)
+@show status
+a = 5
