@@ -17,19 +17,11 @@ Alternatively Julia can be run inside a Posix environment such as Cygwin.
 
 import Base.:(==)
 
-include("Session/session.jl")
-export  AbstractSession,
-        AbstractBashSession,
-        BashSession,
-        LocalBashSession,
-        RemoteSSHSession,
-        bashsession,
-        iswindows,
-        indir,
-        run,
+include("Session/shell.jl")
+export  Shell, BashShell, LocalBashShell, SSHShell,
+        run, checkoutput, stringoutput, showoutput
         |>,
-        close,
-        runcmd, checkoutput, stringoutput, showoutput
+        isopen, close
 
 include("System/bash_commands.jl")
 export  isdir, isfile, islink, isexe, abspath, parent, pwd,

@@ -138,7 +138,7 @@ mutable struct Shell{ST <: ShellType, CT <: ConnectionType} <: AbstractShell
 
         # Activate custom working directory
         # May throw if the path does not exist
-        #cd(s, pwd)
+        cd(s, pwd)
 
         # Define destructor for all Shell subtypes (exiting the background bash program)
         # This will be called by the GC
@@ -164,16 +164,21 @@ cmdstr(cmd::Base.Cmd) = join(cmd.exec," ")
 @inline redirect_stderr_str(s::Shell{PowerShell,CT}) where {CT <: ConnectionType} = "1>2"
 
 """
-    run(session::Shell, cmd::Base.Cmd; newline_out::Function, newline_err::Function) -> Int64
+    run(s::Shell, cmd::Base.Cmd; newline_out::Function, newline_err::Function) -> Int64
     * `session` bash session
-    * `cmd` Command to be launched in the bash session
+    * `cmd` Command to be launched in the Shell
     * `newline_out::Union{Function, Nothing}`: Callback that will be called for each new `stdout` lines created by the separate process.
     * `newline_err::Union{Function, Nothing}`: Callback that will be called for each new `stderr` lines created by the separate process.
-Run the `cmd` command in the active bash session.
+Run the `cmd` command in the active Shell `s`.
 This method is blocking and will return as soon a the command finished (success or error).
 Return the status of the launched command (given by bash variable `\$?`).
 """
-function run(s::Shell, cmd::Base.Cmd; newline_out::Function, newline_err::Function)
+function run(
+    s::Shell,
+    cmd::Base.Cmd;
+    newline_out::Union{Function, Nothing} = nothing,
+    newline_err::Union{Function, Nothing} = nothing,
+)
     # Lock this method
     lock(s.run_mutex)
 
@@ -192,9 +197,9 @@ function run(s::Shell, cmd::Base.Cmd; newline_out::Function, newline_err::Functi
         # Channel to communicate between the two subtasks (handle stdout and handle stderr)
         ch_done = Channel(1)
 
-        # Launch stdout handle subtask
+        # Launch stdout handle subtask (only is there is a callback)
         task_out = @async begin
-            while Base.isopen(ch_done)
+            while Base.isopen(ch_done) && !isnothing(newline_out)
                 # Blocks until a entry is avaible in the channel
                 # Takes the entry and unlock the channel to be filled again
                 # readavailable also empties the content of the stream that it reads from
@@ -206,11 +211,11 @@ function run(s::Shell, cmd::Base.Cmd; newline_out::Function, newline_err::Functi
             end
         end
 
-        # Launch stderr handle subtask
+        # Launch stderr handle subtask (only is there is a callback)
         task_err = @async begin
             done = false
             status = "-1"
-            while !done
+            while !done && !isnothing(newline_err)
                 # Blocks until a entry is avaible in the channel
                 # Takes the entry and unlock the channel to be filled again
                 out = String(readavailable(errstream(s)))
@@ -260,6 +265,8 @@ function run(s::Shell, cmd::Base.Cmd; newline_out::Function, newline_err::Functi
     return status
 end
 
+isopen(s::Shell) = Base.process_running(s.interproc)
+
 """
     `close(s::Shell)`
 Closes `s` by sending the `exit` signal to its internal process `interproc`.
@@ -285,6 +292,37 @@ function close(s::Shell)
     unlock(s.run_mutex)
 end
 
+"""
+    checkoutput(cmd::AbstractString, session::AbstractSession)::Vector{String}
+Calls `CommandLine.run` and returns the whole standart output in a Vector of `String`.
+If the call fails, the standart err is outputed as a `String` is a raised Exception.
+"""
+function checkoutput(s::Shell, cmd::Base.Cmd)
+    # TODO: Should it throw ?
+    out = Vector{String}()
+    err = ""
+    status = CommandLine.run(
+        s,
+        cmd;
+        newline_out = x -> push!(out, x),
+        newline_err = x -> err = err * x
+    )
+    (status != 0) && throw(Base.IOError("$err", status))
+    return out
+end
+
+function stringoutput(s::Shell, cmd::Base.Cmd)
+    out, err = "", ""
+    status = CommandLine.run(
+        s,
+        cmd;
+        newline_out = x -> out = out * x,
+        newline_err = x -> err = err * x
+    )
+    (status != 0) && throw(Base.IOError("$err", status))
+    return out
+end
+
 function showoutput(s::Shell, cmd::Base.Cmd)
     err = ""
     status = run(
@@ -293,10 +331,8 @@ function showoutput(s::Shell, cmd::Base.Cmd)
         newline_err = x -> (println("Error: ",x); err = err * x)
     )
     (status != 0) && throw(Base.IOError("$err", status))
-    nothing
+    return status
 end
-
-isopen(s::Shell) = Base.process_running(s.interproc)
 
 """
 Specific constructors for each combination of ShellType and ConnectionType
@@ -317,10 +353,6 @@ end
 """
 Type aliasing
 """
+BashShell = Shell{ST,CT} where {ST<:Union{Sh, Bash}, CT<:ConnectionType}
 LocalBashShell = Shell{Bash, Local}
 SSHShell = Shell{Bash, SSH}
-
-
-s = LocalBashShell(; pwd = ".")
-f = x -> println(x)
-showoutput(s, `ls .`)
