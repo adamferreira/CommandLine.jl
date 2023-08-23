@@ -22,9 +22,9 @@ end
 @testset "Test join" begin
     pp = PosixPath(["A", "B"])
     wp = WindowsPath(["A", "B"])
-    j1 = CommandLine.join(pp, ["C", "D"])
-    j2 = CommandLine.join(wp, "C", "D")
-    j3 = CommandLine.join(wp, pp)
+    j1 = joinpath(pp, ["C", "D"])
+    j2 = joinpath(wp, "C", "D")
+    j3 = joinpath(wp, pp)
 
     @test isa(j1, PosixPath)
     @test isa(j2, WindowsPath)
@@ -32,6 +32,7 @@ end
     @test segments(j1) == ["A", "B", "C", "D"]
     @test segments(j2) == ["A", "B", "C", "D"]
     @test segments(j3) == ["A", "B", "A", "B"]
+    @test segments(joinpath("A", "B", "C", "D")) == ["A", "B", "C", "D"]
 end
 
 @testset "Test Equals" begin
@@ -57,4 +58,5 @@ end
 
 @testset "Test path macro" begin
     @test segments(@path "A" "B" "C") == ["A", "B", "C"]
+    @test segments(p"A/B/C") == ["A", "B", "C"]
 end

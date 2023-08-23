@@ -10,10 +10,6 @@ segments(path::AbstractPath) = path.segments
 
 # Utilitaries on AbstractPaths
 Base.show(io::IO, x::AbstractPath) = Base.show(io, Base.string(x))
-# Concatenation Utilitaries (TODO: More generic way ?)
-join(x::AbstractPath, y::AbstractString...) = typeof(x)(Base.vcat(segments(x), y...))
-join(x::AbstractPath, y::Vector{String}) = typeof(x)(Base.vcat(segments(x), y)) #TODO: Vector of abstract strings ?
-join(x::AbstractPath, y::AbstractPath) = typeof(x)(Base.vcat(segments(x), segments(y)))
 
 # Comparison Utilitaries
 Base.:(==)(x::AbstractPath, y::AbstractPath) = (typeof(x)==typeof(y)) && (segments(x)==segments(y))
@@ -42,6 +38,12 @@ Base.string(x::AbstractPath) = Base.join(segments(x), __split_char(typeof(x)))
 Base.convert(t::Type{PosixPath}, x::AbstractPath) = t(segments(x))
 Base.convert(t::Type{WindowsPath}, x::AbstractPath) = t(segments(x))
 
+# Concatenation Utilitaries (TODO: More generic way ?)
+joinpath(x::AbstractString...) = pathtype()(x...)
+joinpath(x::AbstractPath, y::AbstractString...) = typeof(x)(Base.vcat(segments(x), y...))
+joinpath(x::AbstractPath, y::Vector{String}) = typeof(x)(Base.vcat(segments(x), y)) #TODO: Vector of abstract strings ?
+joinpath(x::AbstractPath, y::AbstractPath) = typeof(x)(Base.vcat(segments(x), segments(y)))
+
 
 """
     Get the path type (AbstractPath) of the current operating system
@@ -63,4 +65,7 @@ macro path(args...)
     pathtype()(args...)
 end
 
-joinpath(x::AbstractString...) = pathtype()(x...)
+macro p_str(strargs)
+    # Read String as PosixPath
+    pathtype()(PosixPath(strargs))
+end
