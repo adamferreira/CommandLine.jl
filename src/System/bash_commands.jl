@@ -9,6 +9,7 @@ function __check_path(flag::AbstractString, path, s)
     return Base.parse(Bool, out)
 end
 
+# TODO: for non-posix shells
 joinpath(x, y...) = Base.join(vcat(x, [y...]), '/')
 
 """

@@ -1,3 +1,7 @@
 using CommandLine
 
-@time showoutput("ls")
+s = LocalGitBash()
+
+CommandLine.indir(s, "Projects") do s 
+    ls(s, ".")
+end

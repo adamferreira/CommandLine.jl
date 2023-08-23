@@ -18,26 +18,29 @@ Alternatively Julia can be run inside a Posix environment such as Cygwin.
 import Base.:(==)
 
 include("Session/shell.jl")
-export  Shell, BashShell, LocalBashShell, SSHShell,
+export  ShellType, Sh, Bash, PowerShell, MySys,
+        ConnectionType, Local, SSH,
+        Shell, BashShell, LocalShell, SSHShell, LocalBashShell,
+        LocalGitBash,
         run, checkoutput, stringoutput, showoutput
         |>,
-        isopen, close
+        isopen, close, indir
 
 include("System/bash_commands.jl")
 export  isdir, isfile, islink, isexe, abspath, parent, pwd,
         cd, env, cp, ls, rm, mkdir, chmod
 
-include("System/transfer.jl")
-export  default_ssh_keys, scp1, transfer_files
+#include("System/transfer.jl")
+#export  default_ssh_keys, scp1, transfer_files
 
-include("System/git.jl")
-export  git_status, changes, tracked_files
+#include("System/git.jl")
+#export  git_status, changes, tracked_files
 
-include("System/file.jl")
-export  watch_files
+#include("System/file.jl")
+#export  watch_files
 
-include("System/process.jl")
-export  AbstractProcess, BackgroundProcess, kill
+#include("System/process.jl")
+#export  AbstractProcess, BackgroundProcess, kill
 
 
 # Global default session is a local bash session
@@ -62,7 +65,7 @@ for fct in Symbol[
     :mkdir,
     :chmod,
 ]
-@eval $(fct)(cmd, args...; kwargs...) = $(fct)(default_session(), cmd, args...; kwargs...)
+#@eval $(fct)(cmd, args...; kwargs...) = $(fct)(default_session(), cmd, args...; kwargs...)
 end
 
 
@@ -75,7 +78,7 @@ export @run, default_session
 
 # Open local bash session when loading the package
 function __init__()
-    global DEFAULT_SESSION = LocalBashSession()
+    global DEFAULT_SESSION = nothing#LocalBashShell()
 end
 
 # Precompile CommandLine package

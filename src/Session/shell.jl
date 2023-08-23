@@ -41,7 +41,7 @@ function run_background(
     dir::String = Base.pwd(),
     env::Dict{String,String} = copy(ENV),
     windows_verbatim::Bool = Sys.iswindows(),
-    windows_hide::Bool = false
+    windows_hide::Bool = true
 )::Base.Process
     # Open the different communication pipes
     # Reading from a BufferStream blocks until data is available
@@ -154,6 +154,8 @@ errstream(s::Shell) = s.interproc.err
 
 # Transform a command to its instanciated string
 cmdstr(cmd::Base.Cmd) = join(cmd.exec," ")
+# Stirng specilization for generic call of `cmdstr` is `run`
+cmdstr(cmd::String) = cmd
 # Get the last command return code
 @inline last_cmd_status_str(s::Shell{PowerShell,CT}) where {CT <: ConnectionType} = "\$?"
 @inline last_cmd_status_str(s::Shell{Sh,CT}) where {CT <: ConnectionType} = "\$?"
@@ -163,10 +165,12 @@ cmdstr(cmd::Base.Cmd) = join(cmd.exec," ")
 @inline redirect_stderr_str(s::Shell{Bash,CT}) where {CT <: ConnectionType} = "1>&2"
 @inline redirect_stderr_str(s::Shell{PowerShell,CT}) where {CT <: ConnectionType} = "1>2"
 
+# TODO: Set pathtypes for each Shell Types
+
 """
-    run(s::Shell, cmd::Base.Cmd; newline_out::Function, newline_err::Function) -> Int64
+    run(s::Shell, cmd::Union{Base.Cmd, String}; newline_out::Function, newline_err::Function) -> Int64
     * `session` bash session
-    * `cmd` Command to be launched in the Shell
+    * `cmd` Command to be launched in the Shell (using Strings  is faster and induces less memory allocations)
     * `newline_out::Union{Function, Nothing}`: Callback that will be called for each new `stdout` lines created by the separate process.
     * `newline_err::Union{Function, Nothing}`: Callback that will be called for each new `stderr` lines created by the separate process.
 Run the `cmd` command in the active Shell `s`.
@@ -175,7 +179,7 @@ Return the status of the launched command (given by bash variable `\$?`).
 """
 function run(
     s::Shell,
-    cmd::Base.Cmd;
+    cmd::Union{Base.Cmd, String};
     newline_out::Union{Function, Nothing} = nothing,
     newline_err::Union{Function, Nothing} = nothing,
 )
@@ -297,7 +301,7 @@ end
 Calls `CommandLine.run` and returns the whole standart output in a Vector of `String`.
 If the call fails, the standart err is outputed as a `String` is a raised Exception.
 """
-function checkoutput(s::Shell, cmd::Base.Cmd)
+function checkoutput(s::Shell, cmd)
     # TODO: Should it throw ?
     out = Vector{String}()
     err = ""
@@ -311,7 +315,7 @@ function checkoutput(s::Shell, cmd::Base.Cmd)
     return out
 end
 
-function stringoutput(s::Shell, cmd::Base.Cmd)
+function stringoutput(s::Shell, cmd)
     out, err = "", ""
     status = CommandLine.run(
         s,
@@ -323,7 +327,7 @@ function stringoutput(s::Shell, cmd::Base.Cmd)
     return out
 end
 
-function showoutput(s::Shell, cmd::Base.Cmd)
+function showoutput(s::Shell, cmd)
     err = ""
     status = run(
         s, cmd;
@@ -335,24 +339,74 @@ function showoutput(s::Shell, cmd::Base.Cmd)
 end
 
 """
+Define pipe operator on `Shell`.
+Calls the command `cmd` inside `s`.
+Usage:
+    `<cmd>` |> s
+"""
+Base.:(|>)(cmd, s::Shell) = showoutput(s, cmd)
+
+"""
 Specific constructors for each combination of ShellType and ConnectionType
 """
 # Bash Shell (bash must be available on the machine)
-function Shell{Bash,CT}(; pwd = "~", env = copy(ENV)) where {CT<:ConnectionType}
-    bashcmd::Base.Cmd = Sys.iswindows() ? `cmd /C bash` : `bash`
-    return Shell{Bash,CT}(bashcmd; pwd=pwd, env=env)
+#function Shell{Bash,CT}(; pwd = "~", env = copy(ENV)) where {CT<:ConnectionType}
+#    bashcmd::Base.Cmd = Sys.iswindows() ? `cmd /C bash` : `bash`
+#    return Shell{Bash,CT}(bashcmd; pwd=pwd, env=env)
+#end
+#
+#function Shell{PowerShell,CT}(; pwd = "~", env = copy(ENV)) where {CT<:ConnectionType}
+#    Sys.iswindows() || @error "Can only instanciate PowerShell session in Windows environments"
+#    # -NoLogo is to prevent the welcome header from appearing
+#    return Shell{PowerShell,CT}(`powershell -NoLogo`; pwd=pwd, env=env)
+#
+#end
+
+"""
+Specific constructors for local shell sessions
+"""
+function Shell{ST,Local}(shellexe::String; pwd = "~", env = copy(ENV)) where {ST<:ShellType}
+    bashcmd::Base.Cmd = Sys.iswindows() ? `cmd /C \"$(shellexe)\"` : `$(shellexe)`
+    return Shell{ST,Local}(bashcmd; pwd=pwd, env=env)
 end
 
-function Shell{PowerShell,CT}(; pwd = "~", env = copy(ENV)) where {CT<:ConnectionType}
-    Sys.iswindows() || @error "Can only instanciate PowerShell session in Windows environments"
-    # -NoLogo is to prevent the welcome header from appearing
-    return Shell{PowerShell,CT}(`powershell -NoLogo`; pwd=pwd, env=env)
-
+function LocalGitBash(; pwd = "~", env = copy(ENV))
+    if Sys.iswindows()
+        return Shell{Bash,Local}("C:/Program Files/Git/bin/bash.exe"; pwd=pwd, env=env)
+    else
+        error("GitBash Shell is not supported for Linux yet")
+    end
 end
 
 """
 Type aliasing
 """
 BashShell = Shell{ST,CT} where {ST<:Union{Sh, Bash}, CT<:ConnectionType}
-LocalBashShell = Shell{Bash, Local}
-SSHShell = Shell{Bash, SSH}
+LocalShell = Shell{ST,Local} where {ST<:ShellType}
+SSHShell = Shell{ST,SSH} where {ST<:Union{Sh, Bash}}
+LocalBashShell = LocalShell{Bash}
+
+
+"""
+    `indir(body::Function, s::Shell, dir::String; createdir::Bool = false)`
+Performs all operations in `body` on Shell `s` inside the directly `dir`.
+Arg `createdir` creates `dir` if it does not exist in Shell `s`.
+All instructions in `body` are assumed to run sequentially on `s`.
+After `body` is called, the Shell `s` goes back to its previous current directly.
+
+    indir(s, "~") do s
+        @assert pwd(s) == "~"
+    end
+"""
+function indir(body::Function, s::Shell, dir::String; createdir::Bool = false)
+    if !isdir(s, dir) && createdir
+        mkdir(s, dir)
+    end
+    @assert isdir(s, dir)
+    cd(s, dir)
+    try
+        body(s)
+    finally
+        cd(s, "-")
+    end
+end
