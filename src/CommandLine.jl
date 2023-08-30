@@ -17,6 +17,10 @@ Alternatively Julia can be run inside a Posix environment such as Cygwin.
 
 import Base.:(==)
 
+include("path.jl")
+export  AbstractPath, PosixPath, WindowsPath,
+        joinpath, pathtype, segments, @path
+
 include("Session/shell.jl")
 export  ShellType, Sh, Bash, PowerShell, MySys,
         ConnectionType, Local, SSH,
