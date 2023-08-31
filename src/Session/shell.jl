@@ -113,6 +113,7 @@ mutable struct Shell{ST <: ShellType, CT <: ConnectionType} <: AbstractShell
     run_mutex::Base.Threads.Condition
 
     # Default (Generic) constructor
+    # TODO: Empty ENV by default ?
     function Shell{ST,CT}(cmd::Base.Cmd; pwd = Base.pwd(), env = copy(ENV)) where {ST <: ShellType, CT <: ConnectionType}
         # Launch the internal process in the background
         interproc = run_background(
@@ -269,17 +270,22 @@ function run(
     return status
 end
 
-isopen(s::Shell) = Base.process_running(s.interproc)
+Base.isopen(s::Shell) = Base.process_running(s.interproc)
 
 """
     `close(s::Shell)`
 Closes `s` by sending the `exit` signal to its internal process `interproc`.
 This method is blocking.
 """
-function close(s::Shell)
+function Base.close(s::Shell)
+    if !isopen(s)
+        return nothing
+    end
+
     lock(s.run_mutex)
     # Send the exit signal to the bash process (Do not call `run` here as we will never get the `done` signal)
     # TODO: exit is only valid for Shell s; we should support other closing commands !!!
+    # TODO: Is the exist signal necessary ? Can't we just close the underlying process ?
     write(instream(s), "exit \n")
     # Buffering to make sure the process as processed all its inputs in instream and as finished normally
     # TODO: optimize ?
@@ -289,7 +295,7 @@ function close(s::Shell)
     # Wait for the process to finish (it should have processed the exist signal)
     # Finishing the process closes its streams (in, out, err) and thus finished the treating task binded to the channels (instream, outstream, errstream)
     wait(s.interproc)
-    #close(instream(s)); close(outstream(s)); close(errstream(s));
+    close(instream(s)); close(outstream(s)); close(errstream(s)); close(s.interproc);
     # s.task_out and s.task_err will termiate as outstream(s) and errstream(s) are now closed
     @assert !isopen(outstream(s))
     @assert !isopen(errstream(s))
@@ -345,6 +351,26 @@ Usage:
     `<cmd>` |> s
 """
 Base.:(|>)(cmd, s::Shell) = showoutput(s, cmd)
+
+macro run_str(scmd, sess)
+    s = Meta.parse(sess)
+    return :(CommandLine.run($s, $scmd))
+end
+
+"""
+    Define access of environment variables within the Shell as `Dict`-like access
+"""
+function Base.getindex(s::Shell, key)
+    v = stringoutput(s, "echo \${$key}")
+    return v == "" ? nothing : v
+end
+function Base.setindex!(s::Shell, value, key)
+    # TODO: Cache value locally ?
+    stringoutput(s, "export $key=$value")
+    nothing
+end
+
+# TODO: define pathtype for Shell ?
 
 """
 Specific constructors for each combination of ShellType and ConnectionType
