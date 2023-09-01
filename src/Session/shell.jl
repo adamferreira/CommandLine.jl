@@ -139,7 +139,7 @@ mutable struct Shell{ST <: ShellType, CT <: ConnectionType} <: AbstractShell
 
         # Activate custom working directory
         # May throw if the path does not exist
-        cd(s, pwd)
+        #cd(s, pwd)
 
         # Define destructor for all Shell subtypes (exiting the background bash program)
         # This will be called by the GC
@@ -149,9 +149,9 @@ mutable struct Shell{ST <: ShellType, CT <: ConnectionType} <: AbstractShell
 end
 
 # Stream access (set by run_background)
-instream(s::Shell) = s.interproc.in
-outstream(s::Shell) = s.interproc.out
-errstream(s::Shell) = s.interproc.err
+instream(s::Shell)::IO = s.interproc.in
+outstream(s::Shell)::IO = s.interproc.out
+errstream(s::Shell)::IO = s.interproc.err
 
 # Transform a command to its instanciated string
 cmdstr(cmd::Base.Cmd) = join(cmd.exec," ")
@@ -203,6 +203,8 @@ function run(
         ch_done = Channel(1)
 
         # Launch stdout handle subtask (only is there is a callback)
+        # As s.interproc is a internal process and feeds s.interproc.out in real-termiate
+        # We need to read it in real time
         task_out = @async begin
             while Base.isopen(ch_done) && !isnothing(newline_out)
                 # Blocks until a entry is avaible in the channel
@@ -277,10 +279,14 @@ Base.isopen(s::Shell) = Base.process_running(s.interproc)
 Closes `s` by sending the `exit` signal to its internal process `interproc`.
 This method is blocking.
 """
-function Base.close(s::Shell)
+function close2(s::Shell)
     if !isopen(s)
         return nothing
     end
+
+    close(s.interproc)
+    # Finishing the process closes its streams (in, out, err) and thus finished the treating task binded to the channels (instream, outstream, errstream)
+    wait(s.interproc)
 
     lock(s.run_mutex)
     # Send the exit signal to the bash process (Do not call `run` here as we will never get the `done` signal)
@@ -300,6 +306,23 @@ function Base.close(s::Shell)
     @assert !isopen(outstream(s))
     @assert !isopen(errstream(s))
     unlock(s.run_mutex)
+end
+
+"""
+    `close(s::Shell)`
+Closes `s` by sending the `exit` signal to its internal process `interproc`.
+This method is blocking.
+"""
+function Base.close(s::Shell)
+    # Do not `lock(s.run_mutex)` as we want this call to interrupt the shell program
+
+    if !isopen(s)
+        return nothing
+    end
+
+    close(s.interproc)
+    # Finishing the process closes its streams (in, out, err) and thus finished the treating task binded to the channels (instream, outstream, errstream)
+    wait(s.interproc)
 end
 
 """
