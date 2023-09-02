@@ -139,7 +139,7 @@ mutable struct Shell{ST <: ShellType, CT <: ConnectionType} <: AbstractShell
 
         # Activate custom working directory
         # May throw if the path does not exist
-        #cd(s, pwd)
+        cd(s, pwd)
 
         # Define destructor for all Shell subtypes (exiting the background bash program)
         # This will be called by the GC
@@ -184,15 +184,15 @@ function run(
     newline_out::Union{Function, Nothing} = nothing,
     newline_err::Union{Function, Nothing} = nothing,
 )
-    # Lock this method
-    lock(s.run_mutex)
 
     # Check if the background process is alive
     if !isopen(s)
         @error "Shell is closed"
-        unlock(s.run_mutex)
         return
     end
+
+    # Lock this method
+    lock(s.run_mutex)
 
     # Get current process hash to personnalize the `done` signal so it does not enter in conflics with normal error logs
     t_uuid = current_task().rngState0
@@ -279,40 +279,6 @@ Base.isopen(s::Shell) = Base.process_running(s.interproc)
 Closes `s` by sending the `exit` signal to its internal process `interproc`.
 This method is blocking.
 """
-function close2(s::Shell)
-    if !isopen(s)
-        return nothing
-    end
-
-    close(s.interproc)
-    # Finishing the process closes its streams (in, out, err) and thus finished the treating task binded to the channels (instream, outstream, errstream)
-    wait(s.interproc)
-
-    lock(s.run_mutex)
-    # Send the exit signal to the bash process (Do not call `run` here as we will never get the `done` signal)
-    # TODO: exit is only valid for Shell s; we should support other closing commands !!!
-    # TODO: Is the exist signal necessary ? Can't we just close the underlying process ?
-    write(instream(s), "exit \n")
-    # Buffering to make sure the process as processed all its inputs in instream and as finished normally
-    # TODO: optimize ?
-    while process_running(s.interproc)
-        sleep(0.05)
-    end
-    # Wait for the process to finish (it should have processed the exist signal)
-    # Finishing the process closes its streams (in, out, err) and thus finished the treating task binded to the channels (instream, outstream, errstream)
-    wait(s.interproc)
-    close(instream(s)); close(outstream(s)); close(errstream(s)); close(s.interproc);
-    # s.task_out and s.task_err will termiate as outstream(s) and errstream(s) are now closed
-    @assert !isopen(outstream(s))
-    @assert !isopen(errstream(s))
-    unlock(s.run_mutex)
-end
-
-"""
-    `close(s::Shell)`
-Closes `s` by sending the `exit` signal to its internal process `interproc`.
-This method is blocking.
-"""
 function Base.close(s::Shell)
     # Do not `lock(s.run_mutex)` as we want this call to interrupt the shell program
 
@@ -323,6 +289,9 @@ function Base.close(s::Shell)
     close(s.interproc)
     # Finishing the process closes its streams (in, out, err) and thus finished the treating task binded to the channels (instream, outstream, errstream)
     wait(s.interproc)
+    close(instream(s)); close(outstream(s)); close(errstream(s));
+    @assert !isopen(outstream(s))
+    @assert !isopen(errstream(s))
 end
 
 """
@@ -344,7 +313,7 @@ function checkoutput(s::Shell, cmd)
     return out
 end
 
-function stringoutput(s::Shell, cmd)
+function stringoutput(s::Shell, cmd)::String
     out, err = "", ""
     status = CommandLine.run(
         s,
@@ -354,6 +323,17 @@ function stringoutput(s::Shell, cmd)
     )
     (status != 0) && throw(Base.IOError("$err", status))
     return out
+end
+
+function nooutput(s::Shell, cmd)
+    err = ""
+    status = run(
+        s, cmd;
+        newline_out = nothing,
+        newline_err = x -> err = err * x
+    )
+    (status != 0) && throw(Base.IOError("$err", status))
+    return nothing
 end
 
 function showoutput(s::Shell, cmd)
