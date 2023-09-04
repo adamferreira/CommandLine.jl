@@ -9,8 +9,7 @@ function __check_path(flag::AbstractString, path, s)
     return Base.parse(Bool, out)
 end
 
-# TODO: for non-posix shells
-joinpath(x, y...) = Base.join(vcat(x, [y...]), '/')
+posix_joinpath(x, y...) = Base.join(vcat(x, [y...]), '/')
 
 """
     isdir(s::BashShell, path) -> Bool
@@ -23,8 +22,9 @@ isexe(s::BashShell, path) = __check_path("-x", path, s)
 abspath(s::BashShell, path) = CommandLine.stringoutput(s, "realpath $(path)")
 parent(s::BashShell, path) = CommandLine.stringoutput(s, "dirname $(path)")
 pwd(s::BashShell) = CommandLine.stringoutput(s, "pwd")
-cd(s::BashShell, path) = CommandLine.stringoutput(s, "cd $(path)")
-cp(s::BashShell, src, dest) = CommandLine.stringoutput(s, "cd $(src) $(dest)")
+cd(s::BashShell, path) = CommandLine.nooutput(s, "cd $(path)")
+cp(s::BashShell, src, dest) = CommandLine.nooutput(s, "cd $(src) $(dest)")
+filesize(s::BashShell, p)::Int = Base.parse(Int, CommandLine.stringoutput(s, "stat -c%s $p"))
 
 
 function env(s::BashShell)
@@ -34,21 +34,21 @@ end
 function ls(s::BashShell, path, args::AbstractString...; join::Bool=false)
     strargs = Base.join(vcat(args...), ' ')
     paths = CommandLine.checkoutput(s, "ls $(strargs) $(path)")
-    join && return CommandLine.joinpath.(path, paths)
+    join && return posix_joinpath.(path, paths)
     return paths
 end
 
 function rm(s::BashShell, path, args::AbstractString...)
     strargs = Base.join(vcat(args...), ' ')
-    CommandLine.stringoutput(s, "rm $(strargs) $(path)")
+    CommandLine.nooutput(s, "rm $(strargs) $(path)")
 end
 
 function mkdir(s::BashShell, path, args::AbstractString...)
     strargs = Base.join(vcat(args...), ' ')
-    CommandLine.stringoutput(s, "mkdir $(strargs) $(path)")
+    CommandLine.nooutput(s, "mkdir $(strargs) $(path)")
 end
 
 function chmod(s::BashShell, path, args::AbstractString...)
     strargs = Base.join(vcat(args...), ' ')
-    CommandLine.stringoutput(s, "chmod $(strargs) $(path)")
+    CommandLine.nooutput(s, "chmod $(strargs) $(path)")
 end

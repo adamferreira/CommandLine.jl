@@ -111,10 +111,13 @@ mutable struct Shell{ST <: ShellType, CT <: ConnectionType} <: AbstractShell
     interproc::Base.Process
     # Mutex to avoid colision en stream when session are used asynchronously
     run_mutex::Base.Threads.Condition
+    # Default function to use when invoking `run(::Shell, cmd)`
+    # This function should take (::Shell, ::Union{Base.Cmd, String}) as arguments
+    handler::Function
 
     # Default (Generic) constructor
     # TODO: Empty ENV by default ?
-    function Shell{ST,CT}(cmd::Base.Cmd; pwd = Base.pwd(), env = copy(ENV)) where {ST <: ShellType, CT <: ConnectionType}
+    function Shell{ST,CT}(cmd::Base.Cmd; pwd = "~", env = copy(ENV), handler::Function = showoutput) where {ST <: ShellType, CT <: ConnectionType}
         # Launch the internal process in the background
         interproc = run_background(
             cmd;
@@ -134,7 +137,8 @@ mutable struct Shell{ST <: ShellType, CT <: ConnectionType} <: AbstractShell
             cmd,
             isnothing(env) ? Dict{String,String}() : env,
             interproc,
-            Base.Threads.Condition()
+            Base.Threads.Condition(),
+            handler
         )
 
         # Activate custom working directory
@@ -178,12 +182,12 @@ Run the `cmd` command in the active Shell `s`.
 This method is blocking and will return as soon a the command finished (success or error).
 Return the status of the launched command (given by bash variable `\$?`).
 """
-function run(
+function run_with(
     s::Shell,
     cmd::Union{Base.Cmd, String};
     newline_out::Union{Function, Nothing} = nothing,
     newline_err::Union{Function, Nothing} = nothing,
-)
+)::Int64
 
     # Check if the background process is alive
     if !isopen(s)
@@ -272,6 +276,30 @@ function run(
     return status
 end
 
+"""
+    `run_with` wrapper where only `newline_out` is required.
+Erros are parsed and handled a local Exceptions.
+"""
+function run_with(s::Shell, cmd::Union{Base.Cmd, String}, stdout_cb::Union{Function, Nothing})::Int64
+    err::String = ""
+    status = CommandLine.run_with(s, cmd;
+        newline_out = x -> stdout_cb(x),
+        newline_err = x -> err = err * x
+    )
+    (status != 0) && throw(Base.IOError("$err", status))
+    return status
+end
+
+"""
+    `run_with` wrapper using `Shell` default stdout handler callback.
+Erros are parsed and handled a local Exceptions.
+"""
+function run(s::Shell, cmd::Union{Base.Cmd, String})::Any
+    return s.handler(s, cmd)
+end
+
+
+
 Base.isopen(s::Shell) = Base.process_running(s.interproc)
 
 """
@@ -281,7 +309,6 @@ This method is blocking.
 """
 function Base.close(s::Shell)
     # Do not `lock(s.run_mutex)` as we want this call to interrupt the shell program
-
     if !isopen(s)
         return nothing
     end
@@ -300,51 +327,24 @@ Calls `CommandLine.run` and returns the whole standart output in a Vector of `St
 If the call fails, the standart err is outputed as a `String` is a raised Exception.
 """
 function checkoutput(s::Shell, cmd)
-    # TODO: Should it throw ?
     out = Vector{String}()
-    err = ""
-    status = CommandLine.run(
-        s,
-        cmd;
-        newline_out = x -> push!(out, x),
-        newline_err = x -> err = err * x
-    )
-    (status != 0) && throw(Base.IOError("$err", status))
+    CommandLine.run_with(s, cmd, x -> push!(out, x))
     return out
 end
 
 function stringoutput(s::Shell, cmd)::String
-    out, err = "", ""
-    status = CommandLine.run(
-        s,
-        cmd;
-        newline_out = x -> out = out * x,
-        newline_err = x -> err = err * x
-    )
-    (status != 0) && throw(Base.IOError("$err", status))
+    out::String = ""
+    CommandLine.run_with(s, cmd, x -> out = out * x)
     return out
 end
 
 function nooutput(s::Shell, cmd)
-    err = ""
-    status = run(
-        s, cmd;
-        newline_out = nothing,
-        newline_err = x -> err = err * x
-    )
-    (status != 0) && throw(Base.IOError("$err", status))
+    CommandLine.run_with(s, cmd, nothing)
     return nothing
 end
 
 function showoutput(s::Shell, cmd)
-    err = ""
-    status = run(
-        s, cmd;
-        newline_out = x -> println(x),
-        newline_err = x -> (println("Error: ",x); err = err * x)
-    )
-    (status != 0) && throw(Base.IOError("$err", status))
-    return status
+    return CommandLine.run_with(s, cmd, x -> println(x))
 end
 
 """
@@ -353,7 +353,7 @@ Calls the command `cmd` inside `s`.
 Usage:
     `<cmd>` |> s
 """
-Base.:(|>)(cmd, s::Shell) = showoutput(s, cmd)
+Base.:(|>)(cmd, s::Shell) = CommandLine.run(s, cmd)
 
 macro run_str(scmd, sess)
     s = Meta.parse(sess)
@@ -369,8 +369,7 @@ function Base.getindex(s::Shell, key)
 end
 function Base.setindex!(s::Shell, value, key)
     # TODO: Cache value locally ?
-    stringoutput(s, "export $key=$value")
-    nothing
+    nooutput(s, "export $key=$value")
 end
 
 # TODO: define pathtype for Shell ?
@@ -394,14 +393,14 @@ Specific constructors for each combination of ShellType and ConnectionType
 """
 Specific constructors for local shell sessions
 """
-function Shell{ST,Local}(shellexe::String; pwd = "~", env = copy(ENV)) where {ST<:ShellType}
+function Shell{ST,Local}(shellexe::String; kwargs...) where {ST<:ShellType}
     bashcmd::Base.Cmd = Sys.iswindows() ? `cmd /C \"$(shellexe)\"` : `$(shellexe)`
-    return Shell{ST,Local}(bashcmd; pwd=pwd, env=env)
+    return Shell{ST,Local}(bashcmd; kwargs...)
 end
 
-function LocalGitBash(; pwd = "~", env = copy(ENV))
+function LocalGitBash(; kwargs...)
     if Sys.iswindows()
-        return Shell{Bash,Local}("C:/Program Files/Git/bin/bash.exe"; pwd=pwd, env=env)
+        return Shell{Bash,Local}("C:/Program Files/Git/bin/bash.exe"; kwargs...)
     else
         error("GitBash Shell is not supported for Linux yet")
     end
@@ -431,7 +430,6 @@ function indir(body::Function, s::Shell, dir::String; createdir::Bool = false)
     if !isdir(s, dir) && createdir
         mkdir(s, dir)
     end
-    @assert isdir(s, dir)
     cd(s, dir)
     try
         body(s)

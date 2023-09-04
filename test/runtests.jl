@@ -1,5 +1,5 @@
 using Test
-using CommandLine
+import CommandLine as CLI
 
 #include("test_paths.jl")
 include("test_run.jl")

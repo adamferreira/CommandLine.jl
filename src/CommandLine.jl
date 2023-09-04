@@ -26,13 +26,15 @@ export  ShellType, Sh, Bash, PowerShell, MySys,
         ConnectionType, Local, SSH,
         Shell, BashShell, LocalShell, SSHShell, LocalBashShell,
         LocalGitBash,
-        run, checkoutput, stringoutput, showoutput
+        instream, outstream, errstream,
+        run, run_with, @run_str,
+        checkoutput, stringoutput, showoutput, nooutput,
         |>,
         isopen, close, indir
 
 include("System/bash_commands.jl")
 export  isdir, isfile, islink, isexe, abspath, parent, pwd,
-        cd, env, cp, ls, rm, mkdir, chmod
+        cd, env, cp, ls, rm, mkdir, chmod, filesize
 
 #include("System/transfer.jl")
 #export  default_ssh_keys, scp1, transfer_files
