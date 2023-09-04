@@ -339,8 +339,7 @@ function stringoutput(s::Shell, cmd)::String
 end
 
 function nooutput(s::Shell, cmd)
-    CommandLine.run_with(s, cmd, nothing)
-    return nothing
+    return CommandLine.run_with(s, cmd, nothing)
 end
 
 function showoutput(s::Shell, cmd)

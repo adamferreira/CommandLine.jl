@@ -1,15 +1,17 @@
-using CommandLine
+import CommandLine as CLI
+import CommandLine.Docker as Docker
 
-s = LocalGitBash()
 
-function run2(s::Shell, cmd::Union{Base.Cmd, String})
-    lock(s.run_mutex) do 
-        write(instream(s), "$(cmd)")
-    end
-end
+s = CLI.LocalGitBash(;pwd = "~", env = Dict{String, String}(), handler = CLI.showoutput)
+s["CL_DOCKER"] = "docker"
+# Example of use:
+# Docker.image(s, "-h"; detach = true, port = "8001:22")
 
-str = raw"""
-function mafonction() {
-    arg1=$1
-}   echo $arg1
-"""
+Docker.run(s, "ubuntu:22.04";
+        name = "ContainerFromCLI",
+        hostname = "MyApp",
+        tty = true,
+        detach = true
+    )
+
+@show Docker.container_exists(s, "ContainerFromCLI")

@@ -17,11 +17,11 @@ Alternatively Julia can be run inside a Posix environment such as Cygwin.
 
 import Base.:(==)
 
-include("path.jl")
+include("System/path.jl")
 export  AbstractPath, PosixPath, WindowsPath,
         joinpath, pathtype, segments, @path
 
-include("Session/shell.jl")
+include("System/shell.jl")
 export  ShellType, Sh, Bash, PowerShell, MySys,
         ConnectionType, Local, SSH,
         Shell, BashShell, LocalShell, SSHShell, LocalBashShell,
@@ -86,6 +86,12 @@ export @run, default_session
 function __init__()
     global DEFAULT_SESSION = nothing#LocalBashShell()
 end
+
+
+# --------------------
+# Sub-Modules
+# --------------------
+include("Modules/docker.jl")
 
 # Precompile CommandLine package
 __precompile__()
