@@ -24,7 +24,10 @@ parent(s::BashShell, path) = CommandLine.stringoutput(s, "dirname $(path)")
 pwd(s::BashShell) = CommandLine.stringoutput(s, "pwd")
 cd(s::BashShell, path) = CommandLine.nooutput(s, "cd $(path)")
 cp(s::BashShell, src, dest) = CommandLine.nooutput(s, "cd $(src) $(dest)")
-filesize(s::BashShell, p)::Int = Base.parse(Int, CommandLine.stringoutput(s, "stat -c%s $p"))
+filesize(s::BashShell, path)::Int = Base.parse(Int, CommandLine.stringoutput(s, "stat -c%s $path"))
+# -u (unix) because of type `BashShell`
+cygpath(s::BashShell, path, arg...) = CommandLine.stringoutput(s, "cygpath -u $path")
+
 
 
 function env(s::BashShell)

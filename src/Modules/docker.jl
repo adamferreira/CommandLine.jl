@@ -1,4 +1,5 @@
 module Docker
+using JSON
 import CommandLine as CLI
 """
 
@@ -100,29 +101,81 @@ for fct in SUB_COMMANDS
     @eval export $(fct)
 end
 
-function get_command(s::CLI.Shell, cmd)
-    return cmd
-end
-
-function container_exists(s::CLI.Shell, cname::String)
+"""
+    containers(s::CLI.Shell, filter::String)::Vector{Dict}
+filter="name=cntname"
+"""
+function containers(s::CLI.Shell, filter::String)::Vector{Dict}
     lock(s.run_mutex)
     # Silent calls for now and get output (save current handler)
     savefct = s.handler
-    s.handler = get_command#CLI.checkoutput
+    s.handler = CLI.checkoutput
 
     # Scrap outputs of `docker container ls`
-    out = container(s,
-        "ls";
-        filter = "name=$(cname)"
-    )
-
+    out = container(s, "ls", "--all"; format="'{{json .}}'", filter=filter)
 
     # Reset Shell to original state
     s.handler = savefct
     unlock(s.run_mutex)
-    return out
+
+    return JSON.parse.(out)
+end
+export containers
+
+function container_exists(s::CLI.Shell, cname::String)
+    return length(containers(s, "name=$(cname)")) > 1
 end
 export container_exists
+
+"""
+    Mount
+(Docker only support posix path as src (host) paths)
+- `type::Symbol`: Either `:HostPath` ou `:Volume`
+- `src::string`: Either a path on the host, or a volume name
+- `target::string`: (Posix) path in the container filesystem
+- `readonly::Bool`: Mount as readonly
+- `driver::string`
+- `opt::Vector{String}` Mount options (see Docker's --mount)
+"""
+struct Mount
+    type::Symbol 
+    src::string
+    target::string
+    readonly::Bool
+    driver::string
+    opt::Vector{String}
+
+    function Mount(
+        type, src, target
+        ;
+        readonly = false,
+        driver = "local",
+        opt = []
+    )
+        return new(type, src, target, readonly, driver, opt)
+    end
+end
+
+function tostring(s::Shell, m::Mount; short = false)
+    src = CLI.stringoutput(s, "cygpath -u $(m.src)")
+    target = CLI.stringoutput(s, "cygpath -u $(m.target)")
+    if short
+        line = "-v $(src):$(target)"
+        if m.readonly
+            line = line * ",ro"
+        end
+    else
+        line = "--mount str=$src,target=$target,volume-driver=$(m.driver)"
+        if m.readonly
+            line = line * ",readonly"
+        end
+        if length(m.opt) > 0
+            line = line * "," * Base.join(map(x -> "volume-opt=$x", m.opt), ",")
+        end
+    end
+    return line
+end
+export tostring
 
 # Todo: Docker container run should return a Shell{Bash, Docker}
 
