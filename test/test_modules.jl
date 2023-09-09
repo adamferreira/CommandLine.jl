@@ -8,7 +8,7 @@ function strfilter(s::String)
 end
 
 function compare_string(a::String, b::String)
-    return strfilter(a) == strfilter(b)
+    @test strfilter(a) == strfilter(b)
 end
 
 @testset "Test Docker Command Generation" begin
@@ -21,7 +21,7 @@ end
         tty = true,
         detach = true
     )
-    @test compare_string(cmd, "docker run --name ContainerFromCLI --hostname MyApp --tty --detach ubuntu:lastet")
+    compare_string(cmd, "docker run --name ContainerFromCLI --hostname MyApp --tty --detach ubuntu:lastet")
 
     cmd = Docker.run(s;
         argument = "ubuntu:lastet",
@@ -30,12 +30,31 @@ end
         tty = true,
         detach = false
     )
-    @test compare_string(cmd, "docker run --name ContainerFromCLI --hostname MyApp --tty ubuntu:lastet")
+    compare_string(cmd, "docker run --name ContainerFromCLI --hostname MyApp --tty ubuntu:lastet")
 
     cmd = Docker.run(s, "--tty";
         argument = "ubuntu:lastet",
         name = "ContainerFromCLI",
         hostname = "MyApp",
     )
-    @test compare_string(cmd, "docker run --tty --name ContainerFromCLI --hostname MyApp ubuntu:lastet")
+    compare_string(cmd, "docker run --tty --name ContainerFromCLI --hostname MyApp ubuntu:lastet")
+
+    # -------- Mounts --------
+    # Short syntax
+    m = Docker.Mount(:hostpath, "path/on/host", "path/in/container")
+    compare_string(Docker.mountstr(s, m), "-v path/on/host:path/in/container")
+    m = Docker.Mount(:hostpath, "path/on/host", "path/in/container"; readonly = true)
+    compare_string(Docker.mountstr(s, m), "-v path/on/host:path/in/container,ro")
+    # Long syntax
+    m = Docker.Mount(:volume, "myvolume", "path/in/container")
+    compare_string(Docker.mountstr(s, m), "--mount src=myvolume,target=path/in/container,volume-driver=local")
+    m = Docker.Mount(:volume, "myvolume", "path/in/container"; readonly = true)
+    compare_string(Docker.mountstr(s, m), "--mount src=myvolume,target=path/in/container,volume-driver=local,readonly")
+    m = Docker.Mount(:volume, "myvolume", "path/in/container"; readonly = true, opt = ["opt1", "opt2"])
+    compare_string(Docker.mountstr(s, m), "--mount src=myvolume,target=path/in/container,volume-driver=local,readonly,volume-opt=opt1,volume-opt=opt2")
+    # Non posix paths
+    m = Docker.Mount(:hostpath, "path\\on\\host", "path/in/container")
+    compare_string(Docker.mountstr(s, m), "-v path/on/host:path/in/container")
+    m = Docker.Mount(:hostpath, "path\\on\\host", "path\\in\\container")
+    compare_string(Docker.mountstr(s, m), "-v path/on/host:path/in/container")
 end

@@ -130,19 +130,19 @@ export container_exists
 """
     Mount
 (Docker only support posix path as src (host) paths)
-- `type::Symbol`: Either `:HostPath` ou `:Volume`
-- `src::string`: Either a path on the host, or a volume name
-- `target::string`: (Posix) path in the container filesystem
+- `type::Symbol`: Either `:hostpath` ou `:volume`
+- `src::String`: Either a path on the host, or a volume name
+- `target::String`: (Posix) path in the container filesystem
 - `readonly::Bool`: Mount as readonly
-- `driver::string`
+- `driver::String`
 - `opt::Vector{String}` Mount options (see Docker's --mount)
 """
 struct Mount
     type::Symbol 
-    src::string
-    target::string
+    src::String
+    target::String
     readonly::Bool
-    driver::string
+    driver::String
     opt::Vector{String}
 
     function Mount(
@@ -156,16 +156,20 @@ struct Mount
     end
 end
 
-function tostring(s::Shell, m::Mount; short = false)
-    src = CLI.stringoutput(s, "cygpath -u $(m.src)")
-    target = CLI.stringoutput(s, "cygpath -u $(m.target)")
+function mountstr(s::CLI.Shell, m::Mount)
+    # Docker only support posix path as src (host) paths
+    src = CLI.cygpath(s, m.src, "-u")
+    target = CLI.cygpath(s, m.target, "-u")
+    # The syntax --mount src=<src>,target=<target>[,volume-driver=<driver>][,readonly][,volume-opt=<opt_i>]*
+    #   Only works when <src> is a volume, thus we prefer the short format
+    #   -v <src>:<target>[,ro]
+    #   When <src> is a (host) path
+    short = (m.type == :hostpath)# || (CLI.isdir(s, src) || CLI.isfile(s, src))
+
     if short
-        line = "-v $(src):$(target)"
-        if m.readonly
-            line = line * ",ro"
-        end
+        line = "-v $(src):$(target)" * (m.readonly ? ",ro" : "")
     else
-        line = "--mount str=$src,target=$target,volume-driver=$(m.driver)"
+        line = "--mount src=$src,target=$target,volume-driver=$(m.driver)"
         if m.readonly
             line = line * ",readonly"
         end
@@ -175,7 +179,7 @@ function tostring(s::Shell, m::Mount; short = false)
     end
     return line
 end
-export tostring
+export mountstr
 
 # Todo: Docker container run should return a Shell{Bash, Docker}
 

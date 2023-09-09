@@ -25,14 +25,18 @@ pwd(s::BashShell) = CommandLine.stringoutput(s, "pwd")
 cd(s::BashShell, path) = CommandLine.nooutput(s, "cd $(path)")
 cp(s::BashShell, src, dest) = CommandLine.nooutput(s, "cd $(src) $(dest)")
 filesize(s::BashShell, path)::Int = Base.parse(Int, CommandLine.stringoutput(s, "stat -c%s $path"))
-# -u (unix) because of type `BashShell`
-cygpath(s::BashShell, path, arg...) = CommandLine.stringoutput(s, "cygpath -u $path")
-
-
 
 function env(s::BashShell)
     return CommandLine.checkoutput(s, "env")
 end
+
+# -u (unix) because of type `BashShell`
+function cygpath(s::BashShell, path, args::AbstractString...)
+    strargs = Base.join(vcat(args...), ' ')
+    return CommandLine.stringoutput(s, ("cygpath $(strargs) \"$(path)\""))
+end
+
+cygpath(s::BashShell, path) = CommandLine.cygpath(s, path, "-u", args...)
 
 function ls(s::BashShell, path, args::AbstractString...; join::Bool=false)
     strargs = Base.join(vcat(args...), ' ')

@@ -34,7 +34,7 @@ export  ShellType, Sh, Bash, PowerShell, MySys,
 
 include("System/bash_commands.jl")
 export  isdir, isfile, islink, isexe, abspath, parent, pwd,
-        cd, env, cp, ls, rm, mkdir, chmod, filesize
+        cd, env, cp, ls, rm, mkdir, chmod, filesize, cygpath
 
 #include("System/transfer.jl")
 #export  default_ssh_keys, scp1, transfer_files

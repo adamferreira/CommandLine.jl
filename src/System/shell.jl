@@ -148,7 +148,8 @@ mutable struct Shell{ST <: ShellType, CT <: ConnectionType} <: AbstractShell
         # Define destructor for all Shell subtypes (exiting the background bash program)
         # This will be called by the GC
         # DEFAULT_SESSION will be closed when exiting Julia
-        finalizer(close, s)
+        #finalizer(close, s)
+        return s
     end
 end
 
@@ -429,10 +430,11 @@ function indir(body::Function, s::Shell, dir::String; createdir::Bool = false)
     if !isdir(s, dir) && createdir
         mkdir(s, dir)
     end
+    prevddir = CommandLine.pwd(s)
     cd(s, dir)
     try
         body(s)
     finally
-        cd(s, "-")
+        cd(s, prevddir)
     end
 end
