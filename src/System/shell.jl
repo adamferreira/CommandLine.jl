@@ -101,6 +101,7 @@ abstract type MySys <: ShellType end # TODO
 abstract type ConnectionType end
 abstract type Local <: ConnectionType end
 abstract type SSH <: ConnectionType end
+abstract type Container <: ConnectionType end
 
 mutable struct Shell{ST <: ShellType, CT <: ConnectionType} <: AbstractShell
     # Underlying command used to start `proc`
@@ -427,14 +428,14 @@ After `body` is called, the Shell `s` goes back to its previous current directly
     end
 """
 function indir(body::Function, s::Shell, dir::String; createdir::Bool = false)
-    if !isdir(s, dir) && createdir
-        mkdir(s, dir)
+    if !CommandLine.isdir(s, dir) && createdir
+        CommandLine.mkdir(s, dir)
     end
     prevddir = CommandLine.pwd(s)
-    cd(s, dir)
+    CommandLine.cd(s, dir)
     try
         body(s)
     finally
-        cd(s, prevddir)
+        CommandLine.cd(s, prevddir)
     end
 end

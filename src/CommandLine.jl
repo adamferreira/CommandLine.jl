@@ -92,6 +92,7 @@ end
 # Sub-Modules
 # --------------------
 include("Modules/docker.jl")
+include("Modules/containedenv.jl")
 
 # Precompile CommandLine package
 __precompile__()

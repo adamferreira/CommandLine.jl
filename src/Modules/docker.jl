@@ -181,6 +181,28 @@ function mountstr(s::CLI.Shell, m::Mount)
 end
 export mountstr
 
-# Todo: Docker container run should return a Shell{Bash, Docker}
 
+
+
+
+# Todo: Docker container run should return a Shell{Bash, Docker}
+# Or an attach fonction ?
+
+end
+
+"""
+    TODO: Useless as s["CL_DOCKER"] = <path> is enought ?
+"""
+function DockerShell(s::Shell, dockerexe)
+    # Shells connecting to docker containers are assumed to be bash shells
+    # Firt, launch a copy of the host's Shell `s`, where we will launch docker
+    dockershell = Shell{Bash, Docker}(
+        s.cmd;
+        pwd = s.pwd,
+        env = copy(s.env),
+        handler = s.handler
+    )
+    # Add a link to docjer exe in the Shell
+    dockershell["CL_DOCKER"] = dockerexe
+    return dockershell
 end
