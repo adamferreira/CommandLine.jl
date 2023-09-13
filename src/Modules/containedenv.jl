@@ -35,9 +35,9 @@ end
 
 """
     Environnement
-- app::String: Name of the app to be deployed
-- user::String: Username to use in the container
-- shell::Shell: Shell on which docker commands will be launched
+- `app::String`: Name of the app to be deployed
+- `user::String`: Username to use in the container
+- `shell::Shell`: Shell on which docker commands will be launched
 """
 mutable struct Environnement
     app::String
