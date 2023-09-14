@@ -15,19 +15,21 @@ Step are invoked for Package as callbacks that take `App` as argument
 struct Package
     name::String
     tag::String
-    cbhost::Function
-    cbimgage::Function
-    cbcontainer::Function
-end
+    cbhost::Union{Nothing,Function}
+    cbimgage::Union{Nothing,Function}
+    cbcontainer::Union{Nothing,Function}
+    dependencies
 
-function Package(
-    name::String,
-    tag::String;
-    install_host::Function = app -> nothing,
-    install_image::Function = app -> nothing,
-    install_container::Function = app -> nothing
-)
-    return new(name, tag, install_host, install_image, install_container)
+    function Package(
+        name::String,
+        tag::String;
+        requires = [],
+        install_host::Union{Nothing,Function} = nothing,
+        install_image::Union{Nothing,Function} =  nothing,
+        install_container::Union{Nothing,Function} = nothing
+    )
+        return new(name, tag, install_host, install_image, install_container, requires)
+    end    
 end
 
 BasePackage(pname::String) = Package(pname, "base")
@@ -53,7 +55,7 @@ mutable struct App
     # Decoke file content as a tape record
     dockerfile_record::Vector{String}
     # Package dependencies
-    dependencies::Dict{Package, Set{Package}}
+    packages::Vector{Package}
 
     function App(
         s::CLI.Shell;
@@ -61,9 +63,9 @@ mutable struct App
         user,
         from)
     
-        app = new(name, user, from, s, PackageManager(from), ["FROM $from"])
+        app = new(name, user, from, s, ["FROM $from"], [])
         # The begining of every containedenv is the same
-        # Setting up `user` as a sudo user and create its home
+        COMMENT(app, "Setting up $user as a sudo user and create its home")
         RUN(
             app,
             "useradd -r -m -U -G sudo -d /home/$user -s /bin/bash -c \"Docker SGE user\" $user",
@@ -77,8 +79,10 @@ mutable struct App
     end
 end
 
-function add_pkg!(app::App, p::Package; requires::Vector{Package} = [])
-    app.dependencies[p] = Set{Package}(requires)
+function add_pkg!(app::App, p::Package)
+    push!(app.packages, p)
+    # Also app p's dependencies
+    map(_p -> push!(app.packages, _p), p.dependencies)
 end
 
 
@@ -97,8 +101,16 @@ end
 
 function RUN(d::App, cmds::String...)
     # Pack each commands into one RUN command to avoir having to much layers
-    run_cmd = Base.join(vcat(cmds...), "&& \\ \t")
+    run_cmd = Base.join(vcat(cmds...), " && \\ \n\t")
     push!(d.dockerfile_record, "RUN $run_cmd")
+end
+
+function COMMENT(d::App, line::String)
+    push!(d.dockerfile_record, "# $line")
+end
+
+function COMMENT(d::App, lines::String...)
+    map(l -> COMMENT(d, l), lines...)
 end
 
 
@@ -111,8 +123,37 @@ end
 
 # ----- Step 2: image setup ---
 function setup_image(app::App)
-    # write in file -> push!(d.dockerfile_record, "FROM $(app.baseimg)")
     pkgs_done = Set{Package}()
+
+    # Run base packages installation in one line to save layer count
+    # Only install package once!
+    map(p -> begin
+        push!(pkgs_done, p)
+        end, filter(p -> p.tag == "base", app.packages)
+    )
+    COMMENT(app, "Installing base packages")
+    RUN(app, "apt-get install -y " * Base.join(map(p -> p.name, collect(pkgs_done)), ' '))
+
+    # Run packages's image step callback
+    map(p -> begin
+        if !(p in pkgs_done)
+            if !isnothing(p.cbimgage)
+                COMMENT(app, "Installing package $(p.name)#$(p.tag)")
+                p.cbimgage(app)
+            end
+            push!(pkgs_done, p)
+        end
+        end, app.packages
+    )
+
+    # Write Dockerfile
+    open(Base.joinpath(Base.pwd(), "Dockerfile"), "w+") do file
+        for line in app.dockerfile_record
+            write(file, line * "\n")
+        end
+        COMMENT(app, "Switch to custom user")
+        write(file, "USER $(app.user)" * '\n')
+    end
 end
 
 # ----- Step 3: container setup ---
@@ -121,11 +162,11 @@ function setup_container(app::App)
 end
 
 function setup(app::App)
-    setup_host(app)
+    #setup_host(app)
     setup_image(app)
-    setup_container(app)
+    #setup_container(app)
 end
 
 export  Package, BasePackage,
-        App, ENV, COPY, RUN, setup
+        App, ENV, COPY, RUN, add_pkg!, setup
 end
