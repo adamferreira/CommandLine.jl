@@ -65,10 +65,15 @@ mutable struct App
     
         app = new(name, user, from, s, ["FROM $from"], [])
         # The begining of every containedenv is the same
+        COMMENT(app, "Setting up global env vars")
+        ENV(app, "USER", user)
+        ENV(app, "HOME", raw"/home/${USER}")
+        COMMENT(app, "Updating package manager")
+        RUN(app, "apt-get update -y", "apt-get upgrade -y")
         COMMENT(app, "Setting up $user as a sudo user and create its home")
         RUN(
             app,
-            "useradd -r -m -U -G sudo -d /home/$user -s /bin/bash -c \"Docker SGE user\" $user",
+            "useradd -r -m -U -G sudo -d /home/$user -s /bin/bash -c 'Docker SGE user' $user",
             "echo \"$user ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee /etc/sudoers.d/$user",
             "chown -R $user /home/$user",
             "mkdir /home/$user/projects",
@@ -85,6 +90,38 @@ function add_pkg!(app::App, p::Package)
     map(_p -> push!(app.packages, _p), p.dependencies)
 end
 
+# ---------------------------
+# Docker Wrapper
+# ---------------------------
+container_name(app::App) = "$(app.appname)_ctn"
+image_name(app::App) = "$(app.appname)_img"
+
+function destroy_container(app::App)
+    containers = Docker.containers(app.shell, "name=$(container_name(app))")
+    # Container already destroyed
+    if length(containers) == 0
+        return nothing
+    end
+    container = containers[1]
+    # Stop the container
+    if container["State"] == "running"
+        Docker.stop(app.shell, container_name(app))
+    end
+
+    container["State"] == "exited" || @error("Could not stop container $(container_name(app))")
+    # Destroy the container
+    Docker.rm(app.shell, container_name(app))
+end
+
+function destroy_image(app::App)
+    image = Docker.get_image(app.shell, image_name(app))
+    # Image already destroyed
+    if isnothing(image)
+        return nothing
+    end
+
+    Docker.image(app.shell, "rm"; argument = image["ID"], force=true)
+end
 
 # ---------------------------
 # Image related
@@ -101,7 +138,7 @@ end
 
 function RUN(d::App, cmds::String...)
     # Pack each commands into one RUN command to avoir having to much layers
-    run_cmd = Base.join(vcat(cmds...), " && \\ \n\t")
+    run_cmd = Base.join(vcat(cmds...), " ;\\ \n\t")
     push!(d.dockerfile_record, "RUN $run_cmd")
 end
 
@@ -125,6 +162,10 @@ end
 function setup_image(app::App)
     pkgs_done = Set{Package}()
 
+    # Delete previous image if it exists
+    destroy_image(app)
+    return nothing
+
     # Run base packages installation in one line to save layer count
     # Only install package once!
     map(p -> begin
@@ -146,14 +187,29 @@ function setup_image(app::App)
         end, app.packages
     )
 
+    # Create tempory dir and Dockerfile
+    dockerfile_dir = Base.pwd()
+    dockerfile = Base.joinpath(dockerfile_dir, "Dockerfile")
+
     # Write Dockerfile
-    open(Base.joinpath(Base.pwd(), "Dockerfile"), "w+") do file
+    open(dockerfile, "w+") do file
         for line in app.dockerfile_record
             write(file, line * "\n")
         end
-        COMMENT(app, "Switch to custom user")
+        write(file, "# Switch to custom user" * '\n')
         write(file, "USER $(app.user)" * '\n')
     end
+
+    # Build image
+    Docker.image(app.shell,
+        "build";
+        tag = image_name(app),
+        argument =  CLI.cygpath(app.shell, dockerfile_dir, "-u") # Local Dockerfile dir
+    )
+
+    # Destroy temporary data
+    CLI.rm(app.shell, CLI.cygpath(app.shell, dockerfile, "-u"))
+    @assert !CLI.isfile(app.shell, CLI.cygpath(app.shell, dockerfile, "-u"))
 end
 
 # ----- Step 3: container setup ---

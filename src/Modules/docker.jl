@@ -127,6 +127,27 @@ function container_exists(s::CLI.Shell, cname::String)
 end
 export container_exists
 
+function get_image(s::CLI.Shell, imgname::String)::Union{Nothing, Dict}
+    lock(s.run_mutex)
+    # Silent calls for now and get output (save current handler)
+    savefct = s.handler
+    s.handler = CLI.checkoutput
+
+    # Scrap outputs of `docker image ls`
+    out = images(s, imgname; format="'{{json .}}'")
+
+    if length(out) == 0 
+        return nothing
+    end
+
+    # Reset Shell to original state
+    s.handler = savefct
+    unlock(s.run_mutex)
+
+    return JSON.parse(out[1])
+end
+export get_image
+
 """
     Mount
 (Docker only support posix path as src (host) paths)

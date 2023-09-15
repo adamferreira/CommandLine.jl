@@ -1,7 +1,8 @@
 import CommandLine as CLI
 import CommandLine.Docker as Docker
+import CommandLine.ContainedEnv as ContainedEnv
 
-
+"""
 s = CLI.LocalGitBash(;pwd = "~", env = Dict{String, String}(), handler = CLI.showoutput)
 s["CL_DOCKER"] = "docker"
 # Example of use:
@@ -17,12 +18,27 @@ Docker.run(s;
 
 #@show Docker.container_exists(s, "ContainerFromCLI")
 @show Docker.containers(s)
-
-user = "aferreira"
-s = """
-useradd -r -m -U -G sudo -d /home/$user -s /bin/bash -c \"Docker SGE user\" $user"
-echo \"$user ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee /etc/sudoers.d/$user
-chown -R $user /home/$user
-mkdir /home/$user/projects
-chown -R $user /home/$user/*
 """
+
+function print_input_output(s::CLI.Shell, cmd)
+    println(cmd)
+    CLI.showoutput(s, cmd)
+end
+
+function testContainedEnv()
+    s = CLI.LocalGitBash(;pwd = "~", env = Dict{String, String}(), handler = print_input_output)
+    s["CL_DOCKER"] = "docker"
+    app = ContainedEnv.App(s; name = "containedenvtest", user = "aferreira", from = "ubuntu:22.04")
+
+
+    cmake = ContainedEnv.BasePackage("cmake")
+    curl = ContainedEnv.BasePackage("curl")
+    cppdev = ContainedEnv.Package("cppdev", "v1.0.0"; requires = [cmake, curl])
+
+    ContainedEnv.add_pkg!(app, cppdev)
+
+
+    ContainedEnv.setup(app)
+end
+
+testContainedEnv()
