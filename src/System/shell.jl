@@ -369,7 +369,7 @@ function Base.getindex(s::Shell, key)
     return v == "" ? nothing : v
 end
 function Base.setindex!(s::Shell, value, key)
-    # TODO: Cache value locally ?
+    s.env[key] = string(value)
     nooutput(s, "export $key=$value")
 end
 
@@ -438,4 +438,15 @@ function indir(body::Function, s::Shell, dir::String; createdir::Bool = false)
     finally
         CommandLine.cd(s, prevddir)
     end
+end
+
+"""
+"""
+function Base.copy(s::Shell)
+    return typeof(s)(
+        s.cmd;
+        pwd = pwd(s),
+        env = copy(s.env),
+        handler = s.handler
+    )
 end

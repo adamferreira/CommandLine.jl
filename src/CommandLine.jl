@@ -33,7 +33,7 @@ export  ShellType, Sh, Bash, PowerShell, MySys,
         isopen, close, indir
 
 include("System/bash_commands.jl")
-export  isdir, isfile, islink, isexe, abspath, parent, pwd,
+export  isdir, isfile, islink, isexe, abspath, parent, basename, pwd,
         cd, env, cp, ls, rm, mkdir, chmod, filesize, cygpath
 
 #include("System/transfer.jl")

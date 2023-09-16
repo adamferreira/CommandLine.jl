@@ -56,31 +56,45 @@ mutable struct App
     dockerfile_record::Vector{String}
     # Package dependencies
     packages::Vector{Package}
+    # Workspace where all files (including Dockefile) wlll be copied before
+    # Copying to image
+    workspace::String
 
     function App(
         s::CLI.Shell;
         name,
         user,
-        from)
+        from,
+        workspace = Base.pwd()
+    )
+        !isnothing(s["CL_DOCKER"]) || @error("Cannot find docker installation")
+
+        # Create temporary workspace for this app (posix path form)
+        tmpdir = "containedenv_$(Base.hash(Base.hash(name), Base.hash(from)))"
+        workspace = CLI.cygpath(s, Base.joinpath(workspace, tmpdir), "-u")
     
-        app = new(name, user, from, s, ["FROM $from"], [])
-        # The begining of every containedenv is the same
-        COMMENT(app, "Setting up global env vars")
-        ENV(app, "USER", user)
-        ENV(app, "HOME", raw"/home/${USER}")
-        COMMENT(app, "Updating package manager")
-        RUN(app, "apt-get update -y", "apt-get upgrade -y")
-        COMMENT(app, "Setting up $user as a sudo user and create its home")
-        RUN(
-            app,
-            "useradd -r -m -U -G sudo -d /home/$user -s /bin/bash -c 'Docker SGE user' $user",
-            "echo \"$user ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee /etc/sudoers.d/$user",
-            "chown -R $user /home/$user",
-            "mkdir /home/$user/projects",
-            "chown -R $user /home/$user/*"
-        )
-    
+        app = new(name, user, from, s, ["FROM $from"], [], workspace)
         return app
+    end
+end
+
+function pkg_mgr(app::App)
+    prefix = "DEBIAN_FRONTEND=noninteractive"
+
+    if occursin("debian", app.baseimg)
+        return "$prefix dpkg"
+    end
+
+    if occursin("ubuntu", app.baseimg)
+        return "$prefix apt-get"
+    end
+
+    if occursin("fedora", app.baseimg)
+        return "$prefix yum"
+    end
+
+    if occursin("alpine", app.baseimg)
+        return "$prefix apk"
     end
 end
 
@@ -95,6 +109,7 @@ end
 # ---------------------------
 container_name(app::App) = "$(app.appname)_ctn"
 image_name(app::App) = "$(app.appname)_img"
+home(app::App) = "/home/$(app.user)"
 
 function destroy_container(app::App)
     containers = Docker.containers(app.shell, "name=$(container_name(app))")
@@ -108,9 +123,10 @@ function destroy_container(app::App)
         Docker.stop(app.shell, container_name(app))
     end
 
+    container = Docker.containers(app.shell, "name=$(container_name(app))")[1]
     container["State"] == "exited" || @error("Could not stop container $(container_name(app))")
     # Destroy the container
-    Docker.rm(app.shell, container_name(app))
+    Docker.rm(app.shell; force=true, argument=container_name(app))
 end
 
 function destroy_image(app::App)
@@ -126,24 +142,29 @@ end
 # ---------------------------
 # Image related
 # ---------------------------
-function ENV(d::App, var, val)
-    push!(d.dockerfile_record, "ENV $var=$val")
+function ENV(app::App, var, val)
+    push!(app.dockerfile_record, "ENV $var=$val")
 end
 
-function COPY(d::App, from, to)
+function COPY(app::App, from, to)
+    # Format to posix because app.shell must be posix shell for now
     from = CLI.cygpath(app.shell, from, "-u")
-    @assert CLI.isdir(app.shell, from) || CLI.isfile(app.shell, from)
-    push!(d.dockerfile_record, "COPY $from $to")
+    file = CLI.basename(app.shell, from)
+    # Only support copying files to containers
+    @assert CLI.isfile(app.shell, from)
+    # Copy files from host to App's temporary workspace
+    CLI.cp(app.shell, from, app.workspace)
+    push!(app.dockerfile_record, "COPY $file $to")
 end
 
-function RUN(d::App, cmds::String...)
+function RUN(app::App, cmds::String...)
     # Pack each commands into one RUN command to avoir having to much layers
     run_cmd = Base.join(vcat(cmds...), " ;\\ \n\t")
-    push!(d.dockerfile_record, "RUN $run_cmd")
+    push!(app.dockerfile_record, "RUN $run_cmd")
 end
 
-function COMMENT(d::App, line::String)
-    push!(d.dockerfile_record, "# $line")
+function COMMENT(app::App, line::String)
+    push!(app.dockerfile_record, "# $line")
 end
 
 function COMMENT(d::App, lines::String...)
@@ -151,20 +172,65 @@ function COMMENT(d::App, lines::String...)
 end
 
 
+# ----- Step 0: init all boilerplate ---
+function init!(app::App)
+    # The begining of every containedenv is the same
+    COMMENT(app, "Setting up global env vars")
+    ENV(app, "USER", app.user)
+    ENV(app, "HOME", raw"/home/${USER}")
+    COMMENT(app, "Updating package manager")
+    RUN(app, "$(pkg_mgr(app)) update -y", "$(pkg_mgr(app)) upgrade -y")
+    RUN(app, "$(pkg_mgr(app)) install -y sudo")
+    COMMENT(app, "Setting up $(app.user) as a sudo user and create its home")
+    RUN(
+        app,
+        "useradd -r -m -U -G sudo -d $(home(app)) -s /bin/bash -c \"Docker SGE user\" $(app.user)",
+        "echo \"$(app.user) ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee /etc/sudoers.d/$(app.user)",
+        "chown -R $(app.user) $(home(app))",
+        "mkdir $(home(app))/projects",
+        "chown -R $(app.user) $(home(app))/*"
+    )
+    @assert !CLI.isdir(app.shell, app.workspace)
+    CLI.mkdir(app.shell, app.workspace)
+    @assert CLI.isdir(app.shell, app.workspace)
 
+    # Copy bash_profile (store in CommandLine module) to the container
+    COPY(app, Base.joinpath(@__DIR__, "bash_profile"), "$(home(app))/.bash_profile")
+end
+
+function clean_workspace(app::App)
+    if CLI.isdir(app.shell, app.workspace)
+        CLI.rm(app.shell, "-rf", app.workspace)
+    end
+end
 
 # ----- Step 1: local setup ---
 function setup_host(app::App)
     pkgs_done = Set{Package}()
+
+    # Run packages's host step callback
+    map(p -> begin
+        if !(p in pkgs_done)
+            if !isnothing(p.cbhost)
+                p.cbhost(app)
+            end
+            push!(pkgs_done, p)
+        end
+        end, app.packages
+    )
 end
 
 # ----- Step 2: image setup ---
-function setup_image(app::App)
+function setup_image(app::App, clean_image)
     pkgs_done = Set{Package}()
 
+    # Delete container before destroying related image
+    destroy_container(app)
+
     # Delete previous image if it exists
-    destroy_image(app)
-    return nothing
+    if clean_image
+        destroy_image(app)
+    end
 
     # Run base packages installation in one line to save layer count
     # Only install package once!
@@ -173,7 +239,7 @@ function setup_image(app::App)
         end, filter(p -> p.tag == "base", app.packages)
     )
     COMMENT(app, "Installing base packages")
-    RUN(app, "apt-get install -y " * Base.join(map(p -> p.name, collect(pkgs_done)), ' '))
+    RUN(app, "$(pkg_mgr(app)) install -y " * Base.join(map(p -> p.name, collect(pkgs_done)), ' '))
 
     # Run packages's image step callback
     map(p -> begin
@@ -187,42 +253,126 @@ function setup_image(app::App)
         end, app.packages
     )
 
-    # Create tempory dir and Dockerfile
-    dockerfile_dir = Base.pwd()
-    dockerfile = Base.joinpath(dockerfile_dir, "Dockerfile")
-
-    # Write Dockerfile
-    open(dockerfile, "w+") do file
-        for line in app.dockerfile_record
-            write(file, line * "\n")
+    # Now work on the App's temporary workspace
+    CLI.indir(app.shell, app.workspace) do shell
+        # Write Dockerfile #TODO do not put -w
+        host_workspace = CLI.cygpath(app.shell, app.workspace, "-w")
+        open(Base.joinpath(host_workspace, "Dockerfile"), "w+") do file
+            for line in app.dockerfile_record
+                write(file, line * "\n")
+            end
+            write(file, "# Switch to custom user" * '\n')
+            write(file, "USER $(app.user)" * '\n')
         end
-        write(file, "# Switch to custom user" * '\n')
-        write(file, "USER $(app.user)" * '\n')
+
+        # Build image
+        Docker.image(app.shell,
+            "build";
+            tag = image_name(app),
+            argument =  "." # Local Dockerfile in the temporary workspace
+        )
     end
+end
 
-    # Build image
-    Docker.image(app.shell,
-        "build";
-        tag = image_name(app),
-        argument =  CLI.cygpath(app.shell, dockerfile_dir, "-u") # Local Dockerfile dir
-    )
+function container_shell_cmd(app::App, interactive::Bool = false)::String
+    # Copy app.shell into a temporary Shell, and change its handler
+    s = copy(app.shell)
+    s.handler = (shell, cmd) -> cmd # trick to get the instanciated command and not running anything
+    if interactive
+        cmd = Docker.exec(s;
+            argument = "$(container_name(app)) bash -l",
+            user = app.user,
+            tty = true,
+            interactive = true
+        )
+    else
+        cmd = Docker.exec(s;
+            argument = "$(container_name(app))",
+            user = app.user,
+            tty = false,
+            interactive = false
+        )
+    end
+    CLI.close(s)
+    return cmd
+end
 
-    # Destroy temporary data
-    CLI.rm(app.shell, CLI.cygpath(app.shell, dockerfile, "-u"))
-    @assert !CLI.isfile(app.shell, CLI.cygpath(app.shell, dockerfile, "-u"))
+"""
+Creates a `Shell` that is running `bash` inside `app`'s container.
+!!!!! for some reason I cannot run docker exec in my CLI.Shell and keep it active (stdin is not a tty)
+So we well have to do docker exec ... bach -c '<cmd>' each time !
+"""
+function container_shell(app::App)::CLI.Shell
+    # Copy app.shell to connect it to the container
+    s = Base.copy(app.shell)
+    # Change s handler so that each command call is wrapper around a
+    # docker exec ... bach -c '<cmd>' call! (may be slow)
+    s.handler = (shell, cmd) -> begin
+        app.shell.handler(shell, "$(container_shell_cmd(app, false)) bash -c '$cmd'")
+    end
+    #TODO: CLI.stringoutput and others do not call the handler !
+    return s
+end
+
+"""
+
+Run `cmd` inside `app`'s container (may be slow)
+"""
+function run(app::App, cmd::String, cb::Function)
+    cb(app.shell, "$(container_shell_cmd(app, false)) bash -c '$cmd'")
 end
 
 # ----- Step 3: container setup ---
 function setup_container(app::App)
+    # Delete previous container if it exists
+    destroy_container(app)
+
+    # Start container (-l -> --login so that bash loads .bash_profile) 
+    container_command = "$(image_name(app)) bash -l"
+    Docker.run(app.shell;
+        argument = container_command,
+        name = container_name(app),
+        hostname = app.appname,
+        user = app.user,
+        tty = true,
+        detach = true
+    )
+
     pkgs_done = Set{Package}()
+
+    # Run packages's container step callback
+    map(p -> begin
+        if !(p in pkgs_done)
+            if !isnothing(p.cbcontainer)
+                p.cbcontainer(app)
+            end
+            push!(pkgs_done, p)
+        end
+        end, app.packages
+    )
+
+    println("Container for app $(app.appname) is ready, you can enter the container with command $(container_shell_cmd(app, true))")
 end
 
-function setup(app::App)
-    #setup_host(app)
-    setup_image(app)
-    #setup_container(app)
+function setup(app::App; clean_image = false)
+    try
+        init!(app)
+        setup_host(app)
+        setup_image(app, clean_image)
+        setup_container(app)
+    catch e
+        # If anything goes wrong, remove everything related to the app
+        clean_workspace(app)
+        destroy_container(app)
+        destroy_image(app)
+        rethrow(e)
+    finally
+        # Destroy temporary workspace now that everything is setup
+        clean_workspace(app)
+    end
 end
+
 
 export  Package, BasePackage,
-        App, ENV, COPY, RUN, add_pkg!, setup
+        App, ENV, COPY, RUN, add_pkg!, setup, home, run
 end
