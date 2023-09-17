@@ -15,9 +15,9 @@ Step are invoked for Package as callbacks that take `App` as argument
 struct Package
     name::String
     tag::String
-    cbhost::Union{Nothing,Function}
-    cbimgage::Union{Nothing,Function}
-    cbcontainer::Union{Nothing,Function}
+    install_host::Union{Nothing,Function}
+    install_image::Union{Nothing,Function}
+    install_container::Union{Nothing,Function}
     dependencies
 
     function Package(
@@ -62,6 +62,8 @@ mutable struct App
     # Workspace where all files (including Dockefile) wlll be copied before
     # Copying to image
     workspace::String
+    # List of mounts to be passed down to `Docker run`
+    mounts::Vector{Docker.Mount}
 
     function App(
         s::CLI.Shell;
@@ -76,7 +78,7 @@ mutable struct App
         tmpdir = "containedenv_$(Base.hash(Base.hash(name), Base.hash(from)))"
         workspace = CLI.cygpath(s, Base.joinpath(workspace, tmpdir), "-u")
     
-        app = new(name, user, from, s, nothing, ["FROM $from"], [], workspace)
+        app = new(name, user, from, s, nothing, ["FROM $from"], [], workspace, [])
         return app
     end
 end
@@ -105,6 +107,10 @@ function add_pkg!(app::App, p::Package)
     push!(app.packages, p)
     # Also app p's dependencies
     map(_p -> push!(app.packages, _p), p.dependencies)
+end
+
+function add_mount!(app::App, m::Docker.Mount)
+    push!(app.mounts, m)
 end
 
 # ---------------------------
@@ -214,8 +220,8 @@ function setup_host(app::App)
     # Run packages's host step callback
     map(p -> begin
         if !(p in pkgs_done)
-            if !isnothing(p.cbhost)
-                p.cbhost(app)
+            if !isnothing(p.install_host)
+                p.install_host(app)
             end
             push!(pkgs_done, p)
         end
@@ -247,9 +253,9 @@ function setup_image(app::App, clean_image)
     # Run packages's image step callback
     map(p -> begin
         if !(p in pkgs_done)
-            if !isnothing(p.cbimgage)
+            if !isnothing(p.install_image)
                 COMMENT(app, "--------------- Installing package $(p.name)#$(p.tag)")
-                p.cbimgage(app)
+                p.install_image(app)
                 COMMENT(app, "---------------")
             end
             push!(pkgs_done, p)
@@ -304,7 +310,9 @@ function setup_container(app::App)
 
     # Start container (-l -> --login so that bash loads .bash_profile) 
     container_command = "$(image_name(app)) bash -l"
-    Docker.run(app.hostshell;
+    Docker.run(
+        app.hostshell,
+        Base.join(map(m -> Docker.mountstr(app.hostshell, m), app.mounts), ' ');
         argument = container_command,
         name = container_name(app),
         hostname = app.appname,
@@ -323,8 +331,8 @@ function setup_container(app::App)
     # Run packages's container step callback
     map(p -> begin
         if !(p in pkgs_done)
-            if !isnothing(p.cbcontainer)
-                p.cbcontainer(app)
+            if !isnothing(p.install_container)
+                p.install_container(app)
             end
             push!(pkgs_done, p)
         end
@@ -354,7 +362,7 @@ end
 
 
 export  Package, BasePackage,
-        App, ENV, COPY, RUN, add_pkg!, setup, home, container_shell_cmd
+        App, ENV, COPY, RUN, add_pkg!, add_mount!, setup, home, container_shell_cmd
 
 include("custom_packages.jl")
 export  JuliaLinux

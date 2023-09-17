@@ -27,7 +27,10 @@ end
 
 s = CLI.LocalGitBash(;pwd = "~", env = Dict{String, String}(), handler = print_input_output)
 s["CL_DOCKER"] = "docker"
+# Required on GitBash, otherwise docker mounts does not work (path are messed up) !
+CLI.run(s, "export MSYS_NO_PATHCONV=1")
 app = ContainedEnv.App(s; name = "julia", user = "aferreira", from = "ubuntu:22.04")
 
-ContainedEnv.add_pkg!(app, ContainedEnv.JuliaLinux())
+ContainedEnv.add_pkg!(app, ContainedEnv.JuliaLinux("1.9.1"))
+ContainedEnv.add_mount!(app, Docker.Mount(:hostpath, @__DIR__, ContainedEnv.home(app)*"/mountdir"))
 ContainedEnv.setup(app)
