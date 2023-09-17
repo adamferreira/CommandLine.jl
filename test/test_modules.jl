@@ -22,6 +22,15 @@ end
         detach = true
     )
     compare_string(cmd, "docker run --name ContainerFromCLI --hostname MyApp --tty --detach ubuntu:lastet")
+    # Also make sure that _str modules method works# _str conterpart returns the command without executing is
+    cmd2 = Docker.run_str(s;
+        argument = "ubuntu:lastet",
+        name = "ContainerFromCLI",
+        hostname = "MyApp",
+        tty = true,
+        detach = true
+    )
+    compare_string(cmd, cmd2)
 
     cmd = Docker.run(s;
         argument = "ubuntu:lastet",

@@ -70,7 +70,7 @@ SUB_COMMANDS = [
 
 # Define SubCommands calls as fonction of the module
 for fct in SUB_COMMANDS
-    @eval function $fct(s::CLI.Shell, args...; kwargs...)
+    @eval function $(Symbol(fct, :_str))(s::CLI.Shell, args...; kwargs...)
         strfct = string($fct)
         strargs = Base.join(vcat(args...), ' ')
 
@@ -95,10 +95,15 @@ for fct in SUB_COMMANDS
                 collect(kwargs))
             ), ' '
         )
-        return CLI.run(s, "$(s[:CL_DOCKER]) $strfct $strargs $strkwargs $last_arg")
+        return "$(s[:CL_DOCKER]) $strfct $strargs $strkwargs $last_arg"
     end
+
+    @eval function $fct(s::CLI.Shell, args...; kwargs...)
+        return CLI.run(s, $(Symbol(fct, :_str))(s, args...; kwargs...))
+    end
+
     # Also export the function
-    @eval export $(fct)
+    @eval export $(fct), $(Symbol(fct, :_str))
 end
 
 """

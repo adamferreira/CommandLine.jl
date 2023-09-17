@@ -25,20 +25,9 @@ function print_input_output(s::CLI.Shell, cmd)
     CLI.showoutput(s, cmd)
 end
 
-function testContainedEnv()
-    s = CLI.LocalGitBash(;pwd = "~", env = Dict{String, String}(), handler = print_input_output)
-    s["CL_DOCKER"] = "docker"
-    app = ContainedEnv.App(s; name = "containedenvtest", user = "aferreira", from = "ubuntu:22.04")
+s = CLI.LocalGitBash(;pwd = "~", env = Dict{String, String}(), handler = print_input_output)
+s["CL_DOCKER"] = "docker"
+app = ContainedEnv.App(s; name = "julia", user = "aferreira", from = "ubuntu:22.04")
 
-
-    cmake = ContainedEnv.BasePackage("cmake")
-    curl = ContainedEnv.BasePackage("curl")
-    cppdev = ContainedEnv.Package("cppdev", "v1.0.0"; requires = [cmake, curl])
-
-    ContainedEnv.add_pkg!(app, cppdev)
-
-
-    ContainedEnv.setup(app)
-end
-
-testContainedEnv()
+ContainedEnv.add_pkg!(app, ContainedEnv.JuliaLinux())
+ContainedEnv.setup(app)

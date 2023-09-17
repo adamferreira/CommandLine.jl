@@ -154,6 +154,11 @@ mutable struct Shell{ST <: ShellType, CT <: ConnectionType} <: AbstractShell
     end
 end
 
+# Access Types
+shell_type(s::Shell{ST,CT}) where {ST<:ShellType, CT<:ConnectionType} = ST
+connection_type(s::Shell{ST,CT}) where {ST<:ShellType, CT<:ConnectionType} = CT
+
+
 # Stream access (set by run_background)
 instream(s::Shell)::IO = s.interproc.in
 outstream(s::Shell)::IO = s.interproc.out
@@ -194,7 +199,7 @@ function run_with(
     # Check if the background process is alive
     if !isopen(s)
         @error "Shell is closed"
-        return
+        return -1
     end
 
     # Lock this method
@@ -406,6 +411,13 @@ function LocalGitBash(; kwargs...)
         error("GitBash Shell is not supported for Linux yet")
     end
 end
+
+
+"""
+`Shell` that does nothing but returning the command it has been given.
+(usefull to instanciate CommandLine's submodules commands like Docker)
+"""
+
 
 """
 Type aliasing

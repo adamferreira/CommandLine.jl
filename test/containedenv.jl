@@ -33,10 +33,11 @@ fakepkg1 = ContainedEnv.Package("fakepkg1", "v0";
     install_image = app -> begin
         ContainedEnv.COPY(app, Base.joinpath(Base.pwd(), "FakeFile.txt"), ContainedEnv.home(app))
     end,
-    # Check that is file is in the contaier, and remove it locally!
+    # Check that the file is in the contaier, and remove it locally!
     install_container = app -> begin
         Base.rm(Base.joinpath(Base.pwd(), "FakeFile.txt"))
-        filecontent = ContainedEnv.run(app, "cat ~/FakeFile.txt", CLI.stringoutput)
+        # At this step, app.contshell should point to a Shell session IN the container
+        filecontent = CLI.stringoutput(app.contshell, "cat ~/FakeFile.txt")
         if filecontent == "Hello from the container"
             println("File successfully found in the container !")
         end
