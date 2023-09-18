@@ -284,7 +284,7 @@ function setup_image(app::App, clean_image)
     end
 end
 
-function container_shell_cmd(app::App, usershell::Bool = false)::String
+function container_shell_cmd(app::App, usershell::Bool = true)::String
     if usershell
         cmd = Docker.exec_str(app.hostshell;
             argument = "$(container_name(app)) bash -l",
@@ -301,6 +301,12 @@ function container_shell_cmd(app::App, usershell::Bool = false)::String
         )
     end
     return cmd
+end
+
+function new_container_shell(app::App)
+    #TODO: No not lock with `CLI.Local` (we need cmd /C `$(container_shell_cmd(app, false))`) on Windows
+    # Otherwise the command will not work: use CLI.connection_type(app.hostshell)
+    return CLI.Shell{CLI.Bash, CLI.Local}(container_shell_cmd(app, false); pwd = "~")
 end
 
 # ----- Step 3: container setup ---
@@ -322,9 +328,7 @@ function setup_container(app::App)
     )
 
     # Now that the container is running, we can create a Shell session in it
-    #TODO: No not lock with `CLI.Local` (we need cmd /C `$(container_shell_cmd(app, false))`) on Windows
-    # Otherwise the command will not work: use CLI.connection_type(app.hostshell)
-    app.contshell = CLI.Shell{CLI.Bash, CLI.Local}(container_shell_cmd(app, false); pwd = "~")
+    app.contshell = new_container_shell(app)
 
     pkgs_done = Set{Package}()
 
@@ -362,7 +366,7 @@ end
 
 
 export  Package, BasePackage,
-        App, ENV, COPY, RUN, add_pkg!, add_mount!, setup, home, container_shell_cmd
+        App, ENV, COPY, RUN, add_pkg!, add_mount!, setup, home, container_shell_cmd, new_container_shell
 
 include("custom_packages.jl")
 export  JuliaLinux
