@@ -346,7 +346,7 @@ function setup_container(app::App)
     println("Container for app $(app.appname) is ready, you can enter the container with command $(container_shell_cmd(app, true))")
 end
 
-function setup(app::App; clean_image = false)
+function setup(app::App; clean_image = false, docker_run_args::Dict)
     try
         init!(app)
         setup_host(app)
