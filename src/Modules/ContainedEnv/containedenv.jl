@@ -310,7 +310,7 @@ function new_container_shell(app::App)
 end
 
 # ----- Step 3: container setup ---
-function setup_container(app::App)
+function setup_container(app::App, user_run_args::String = "")
     # Delete previous container if it exists
     destroy_container(app)
 
@@ -318,8 +318,13 @@ function setup_container(app::App)
     container_command = "$(image_name(app)) bash -l"
     Docker.run(
         app.hostshell,
-        Base.join(map(m -> Docker.mountstr(app.hostshell, m), app.mounts), ' ');
+        # Mounts
+        Base.join(map(m -> Docker.mountstr(app.hostshell, m), app.mounts), ' ')
+        # User arguments
+        user_run_args;
+        # Container name and bash process to launch in the container
         argument = container_command,
+        # Name of the container to be launched
         name = container_name(app),
         hostname = app.appname,
         user = app.user,
@@ -346,12 +351,12 @@ function setup_container(app::App)
     println("Container for app $(app.appname) is ready, you can enter the container with command $(container_shell_cmd(app, true))")
 end
 
-function setup(app::App; clean_image = false, docker_run_args::String)
+function setup(app::App; clean_image = false, docker_run_args::String = "")
     try
         init!(app)
         setup_host(app)
         setup_image(app, clean_image)
-        setup_container(app)
+        setup_container(app, docker_run_args)
     catch e
         # If anything goes wrong, remove everything related to the app
         clean_workspace(app)
