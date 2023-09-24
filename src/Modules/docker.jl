@@ -68,34 +68,39 @@ SUB_COMMANDS = [
     :wait	    # Block until one or more containers stop, then print their exit codes
 ]
 
+function make_cmd(args...; kwargs...)::String
+    strargs = Base.join(vcat(args...), ' ')
+    # Get last argument of the command
+    # for example in  docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
+    # `argument` should be IMAGE
+    last_arg = :argument in keys(kwargs) ? kwargs[:argument] : ""
+    strkwargs = Base.join(
+        vcat(
+            map(p -> begin
+                # Ignore :argument kwargs as it will be used as `last_arg`
+                if (p.first == :argument) return "" end
+
+                if isa(p.second, Bool)
+                    if p.second return "--$(p.first)" end
+                else
+                    return "--$(p.first) $(p.second)"
+                end
+                return ""
+            end,
+            collect(kwargs)
+            )
+        ), ' '
+    )
+
+    return "$strargs $strkwargs $last_arg"
+end
+export make_cmd
+
 # Define SubCommands calls as fonction of the module
 for fct in SUB_COMMANDS
     @eval function $(Symbol(fct, :_str))(s::CLI.Shell, args...; kwargs...)
         strfct = string($fct)
-        strargs = Base.join(vcat(args...), ' ')
-
-        # Get last argument of the command
-        # for example in  docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
-        # `argument` should be IMAGE
-        last_arg = :argument in keys(kwargs) ? kwargs[:argument] : ""
-
-        strkwargs = Base.join(
-            vcat(
-                map(p -> begin
-                    # Ignore :argument kwargs as it will be used as `last_arg`
-                    if (p.first == :argument) return "" end
-
-                    if isa(p.second, Bool)
-                        if p.second return "--$(p.first)" end
-                    else
-                        return "--$(p.first) $(p.second)"
-                    end
-                    return ""
-                end,
-                collect(kwargs))
-            ), ' '
-        )
-        return "$(s[:CL_DOCKER]) $strfct $strargs $strkwargs $last_arg"
+        return "$(s[:CL_DOCKER]) $strfct $(make_cmd(args...; kwargs...))"
     end
 
     @eval function $fct(s::CLI.Shell, args...; kwargs...)
