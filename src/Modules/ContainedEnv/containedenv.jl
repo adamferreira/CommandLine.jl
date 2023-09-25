@@ -319,7 +319,7 @@ function setup_container(app::App, user_run_args::String = "")
     Docker.run(
         app.hostshell,
         # Mounts
-        Base.join(map(m -> Docker.mountstr(app.hostshell, m), app.mounts), ' ')
+        Base.join(map(m -> Docker.mountstr(app.hostshell, m), app.mounts), ' '),
         # User arguments
         user_run_args;
         # Container name and bash process to launch in the container
