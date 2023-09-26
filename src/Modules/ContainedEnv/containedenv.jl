@@ -309,6 +309,10 @@ function new_container_shell(app::App)
     return CLI.Shell{CLI.Bash, CLI.Local}(container_shell_cmd(app, false); pwd = "~")
 end
 
+function container_running(a::App)::Bool
+    status = Docker.containers(app.hostshell, "name=$(container_name(app))")
+end
+
 # ----- Step 3: container setup ---
 function setup_container(app::App, user_run_args::String = "")
     # Delete previous container if it exists
