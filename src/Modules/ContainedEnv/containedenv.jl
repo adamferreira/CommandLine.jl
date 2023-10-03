@@ -204,6 +204,7 @@ function init!(app::App)
     @assert CLI.isdir(app.hostshell, app.workspace)
 
     # Copy bash_profile (store in CommandLine module) to the container
+    #TODO: this seems to not work when CommandLine is installed as a package
     COPY(app, Base.joinpath(@__DIR__, "bash_profile"), "$(home(app))/.bash_profile")
 end
 
@@ -311,6 +312,7 @@ end
 
 function container_running(a::App)::Bool
     status = Docker.containers(app.hostshell, "name=$(container_name(app))")
+    
 end
 
 # ----- Step 3: container setup ---
