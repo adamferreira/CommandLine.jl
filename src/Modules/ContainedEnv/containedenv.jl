@@ -129,9 +129,43 @@ container_name(app::App) = "$(app.appname)_ctn"
 image_name(app::App) = "$(app.appname)_img"
 home(app::App) = "/home/$(app.user)"
 
+# ---------------------------
+# Container related
+# ---------------------------
+function container_shell_cmd(app::App, usershell::Bool = true)::String
+    if usershell
+        cmd = Docker.exec_str(app.hostshell;
+            argument = "$(container_name(app)) bash -l",
+            user = app.user,
+            tty = true,
+            interactive = true
+        )
+    else
+        cmd = Docker.exec_str(app.hostshell;
+            argument = "$(container_name(app)) bash -l",
+            user = app.user,
+            tty = false,
+            interactive = true
+        )
+    end
+    return cmd
+end
+
+function container_running(app::App)::Bool
+    status = Docker.containers(app.hostshell, "name=$(container_name(app))")
+    return length(status) == 0 ? false : status[1]["State"] == "running"
+end
+
+function new_container_shell(app::App)::CLI.Shell
+    container_running(app) || @error("Cannot open a new Shell in container $(container_name(app)): container not running")
+    #TODO: No not lock with `CLI.Local` (we need cmd /C `$(container_shell_cmd(app, false))`) on Windows
+    # Otherwise the command will not work: use CLI.connection_type(app.hostshell)
+    return CLI.Shell{CLI.Bash, CLI.Local}(container_shell_cmd(app, false); pwd = "~")
+end
+
 function destroy_container(app::App)
     containers = Docker.containers(app.hostshell, "name=$(container_name(app))")
-    # Container already destroyed
+    # Container already removed, or never created
     if length(containers) == 0
         return nothing
     end
@@ -141,11 +175,17 @@ function destroy_container(app::App)
         Docker.stop(app.hostshell, container_name(app))
     end
 
+    # Check that the container still exists, but is not running
     container = Docker.containers(app.hostshell, "name=$(container_name(app))")[1]
     container["State"] == "exited" || @error("Could not stop container $(container_name(app))")
     # Destroy the container
     Docker.rm(app.hostshell; force=true, argument=container_name(app))
 end
+
+
+# ---------------------------
+# Image related
+# ---------------------------
 
 function destroy_image(app::App)
     image = Docker.get_image(app.hostshell, image_name(app))
@@ -157,9 +197,6 @@ function destroy_image(app::App)
     Docker.image(app.hostshell, "rm"; argument = image["ID"], force=true)
 end
 
-# ---------------------------
-# Image related
-# ---------------------------
 function ENV(app::App, var, val)
     push!(app.dockerfile_record, "ENV $var $val")
 end
@@ -292,37 +329,6 @@ function setup_image(app::App, clean_image)
             argument =  "." # Local Dockerfile in the temporary workspace
         )
     end
-end
-
-function container_shell_cmd(app::App, usershell::Bool = true)::String
-    if usershell
-        cmd = Docker.exec_str(app.hostshell;
-            argument = "$(container_name(app)) bash -l",
-            user = app.user,
-            tty = true,
-            interactive = true
-        )
-    else
-        cmd = Docker.exec_str(app.hostshell;
-            argument = "$(container_name(app)) bash -l",
-            user = app.user,
-            tty = false,
-            interactive = true
-        )
-    end
-    return cmd
-end
-
-function container_running(app::App)::Bool
-    status = Docker.containers(app.hostshell, "name=$(container_name(app))")
-    return length(status) == 0 ? false : status[1]["State"] == "running"
-end
-
-function new_container_shell(app::App)::CLI.Shell
-    container_running(app) || @error("Cannot open a new Shell in container $(container_name(app)): container not running")
-    #TODO: No not lock with `CLI.Local` (we need cmd /C `$(container_shell_cmd(app, false))`) on Windows
-    # Otherwise the command will not work: use CLI.connection_type(app.hostshell)
-    return CLI.Shell{CLI.Bash, CLI.Local}(container_shell_cmd(app, false); pwd = "~")
 end
 
 # ----- Step 3: container setup ---
