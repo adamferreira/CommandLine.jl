@@ -33,5 +33,5 @@ app = ContainedEnv.App(s; name = "julia", user = "aferreira", from = "ubuntu:22.
 
 ContainedEnv.add_pkg!(app, ContainedEnv.JuliaLinux("1.9.1"))
 ContainedEnv.add_mount!(app, Docker.Mount(:hostpath, @__DIR__, ContainedEnv.home(app)*"/mountdir"))
-#ContainedEnv.setup(app)
+ContainedEnv.setup(app)
 ContainedEnv.container_running(app)

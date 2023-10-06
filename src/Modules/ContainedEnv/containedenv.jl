@@ -79,6 +79,15 @@ mutable struct App
         workspace = CLI.cygpath(s, Base.joinpath(workspace, tmpdir), "-u")
     
         app = new(name, user, from, s, nothing, ["FROM $from"], [], workspace, [])
+        # If the app points to an already running container, we can already open a shell into it
+        # TODO: have an 'open' method?
+        if container_running(app)
+            try
+                app.contshell = new_container_shell(app)
+            catch
+                app.contshell = nothing
+            end
+        end
         return app
     end
 end
@@ -304,15 +313,16 @@ function container_shell_cmd(app::App, usershell::Bool = true)::String
     return cmd
 end
 
-function new_container_shell(app::App)
-    #TODO: No not lock with `CLI.Local` (we need cmd /C `$(container_shell_cmd(app, false))`) on Windows
-    # Otherwise the command will not work: use CLI.connection_type(app.hostshell)
-    return CLI.Shell{CLI.Bash, CLI.Local}(container_shell_cmd(app, false); pwd = "~")
-end
-
 function container_running(app::App)::Bool
     status = Docker.containers(app.hostshell, "name=$(container_name(app))")
     return length(status) == 0 ? false : status[1]["State"] == "running"
+end
+
+function new_container_shell(app::App)::CLI.Shell
+    container_running(app) || @error("Cannot open a new Shell in container $(container_name(app)): container not running")
+    #TODO: No not lock with `CLI.Local` (we need cmd /C `$(container_shell_cmd(app, false))`) on Windows
+    # Otherwise the command will not work: use CLI.connection_type(app.hostshell)
+    return CLI.Shell{CLI.Bash, CLI.Local}(container_shell_cmd(app, false); pwd = "~")
 end
 
 # ----- Step 3: container setup ---
