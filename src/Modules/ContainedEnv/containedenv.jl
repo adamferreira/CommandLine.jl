@@ -310,9 +310,9 @@ function new_container_shell(app::App)
     return CLI.Shell{CLI.Bash, CLI.Local}(container_shell_cmd(app, false); pwd = "~")
 end
 
-function container_running(a::App)::Bool
+function container_running(app::App)::Bool
     status = Docker.containers(app.hostshell, "name=$(container_name(app))")
-    
+    return length(status) == 0 ? false : status[1]["State"] == "running"
 end
 
 # ----- Step 3: container setup ---
@@ -377,7 +377,8 @@ end
 
 
 export  Package, BasePackage,
-        App, ENV, COPY, RUN, add_pkg!, add_mount!, setup, home, container_shell_cmd, new_container_shell
+        App, ENV, COPY, RUN, add_pkg!, add_mount!, setup, home,
+        container_shell_cmd, new_container_shell, container_running
 
 include("custom_packages.jl")
 export  JuliaLinux
