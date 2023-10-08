@@ -187,7 +187,7 @@ struct Mount
     end
 end
 
-function mountstr(s::CLI.Shell, m::Mount)
+function mountstr(s::CLI.Shell, m::Mount)::String
     # Docker only support posix path as src (host) paths
     src = CLI.cygpath(s, m.src, "-u")
     target = CLI.cygpath(s, m.target, "-u")
@@ -210,9 +210,21 @@ function mountstr(s::CLI.Shell, m::Mount)
     end
     return line
 end
-export mountstr
+export Mount, mountstr
 
 
+struct Port
+    on_host::String
+    on_container::String
+    function Port(onhost, oncontainer)
+        return new(onhost, oncontainer)
+    end
+end
+
+function portstr(s::CLI.Shell, m::Port)::String
+    return "-p $(m.on_host):$(m.on_container)"
+end
+export Port, portstr
 
 
 

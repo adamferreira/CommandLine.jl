@@ -64,6 +64,8 @@ mutable struct App
     workspace::String
     # List of mounts to be passed down to `Docker run`
     mounts::Vector{Docker.Mount}
+    # List of port bindings to be passed down to `Docker run`
+    ports::Vector{Docker.Port}
 
     function App(
         s::CLI.Shell;
@@ -78,7 +80,7 @@ mutable struct App
         tmpdir = "containedenv_$(Base.hash(Base.hash(name), Base.hash(from)))"
         workspace = CLI.cygpath(s, Base.joinpath(workspace, tmpdir), "-u")
     
-        app = new(name, user, from, s, nothing, ["FROM $from"], [], workspace, [])
+        app = new(name, user, from, s, nothing, ["FROM $from"], [], workspace, [], [])
         # If the app points to an already running container, we can already open a shell into it
         # TODO: have an 'open' method?
         if container_running(app)
@@ -120,6 +122,10 @@ end
 
 function add_mount!(app::App, m::Docker.Mount)
     push!(app.mounts, m)
+end
+
+function add_port!(app::App, p::Docker.Port)
+    push!(app.ports, p)
 end
 
 # ---------------------------
@@ -226,6 +232,14 @@ function COMMENT(d::App, lines::String...)
     map(l -> COMMENT(d, l), lines...)
 end
 
+# ---------------------------
+# Host related
+# ---------------------------
+function clean_workspace(app::App)
+    if CLI.isdir(app.hostshell, app.workspace)
+        CLI.rm(app.hostshell, "-rf", app.workspace)
+    end
+end
 
 # ----- Step 0: init all boilerplate ---
 function init!(app::App)
@@ -252,12 +266,6 @@ function init!(app::App)
     # Copy bash_profile (store in CommandLine module) to the container
     #TODO: this seems to not work when CommandLine is installed as a package
     COPY(app, Base.joinpath(@__DIR__, "bash_profile"), "$(home(app))/.bash_profile")
-end
-
-function clean_workspace(app::App)
-    if CLI.isdir(app.hostshell, app.workspace)
-        CLI.rm(app.hostshell, "-rf", app.workspace)
-    end
 end
 
 # ----- Step 1: local setup ---
@@ -342,6 +350,8 @@ function setup_container(app::App, user_run_args::String = "")
         app.hostshell,
         # Mounts
         Base.join(map(m -> Docker.mountstr(app.hostshell, m), app.mounts), ' '),
+        # Ports
+        Base.join(map(p -> Docker.portstr(app.hostshell, p), app.ports), ' '),
         # User arguments
         user_run_args;
         # Container name and bash process to launch in the container
@@ -373,7 +383,7 @@ function setup_container(app::App, user_run_args::String = "")
     println("Container for app $(app.appname) is ready, you can enter the container with command $(container_shell_cmd(app, true))")
 end
 
-function setup(app::App; clean_image = false, docker_run_args::String = "")
+function deploy!(app::App; clean_image = false, docker_run_args::String = "")
     try
         init!(app)
         setup_host(app)
@@ -393,7 +403,9 @@ end
 
 
 export  Package, BasePackage,
-        App, ENV, COPY, RUN, add_pkg!, add_mount!, setup, home,
+        App, ENV, COPY, RUN, 
+        add_pkg!, add_mount!, add_port!, deploy!, 
+        home,
         container_shell_cmd, new_container_shell, container_running
 
 include("custom_packages.jl")
