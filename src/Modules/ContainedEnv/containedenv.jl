@@ -71,7 +71,7 @@ mutable struct App
     # List of port bindings to be passed down to `Docker run`
     ports::Vector{Docker.Port}
     # List of network the app's container is connected to
-    #networks::
+    networks::Vector{Docker.Network}
 
     function App(
         s::CLI.Shell;
@@ -87,7 +87,7 @@ mutable struct App
         tmpdir = "containedenv_$(Base.hash(Base.hash(name), Base.hash(from)))"
         workspace = CLI.cygpath(s, Base.joinpath(workspace, tmpdir), "-u")
     
-        app = new(name, user, from, docker_run, s, nothing, ["FROM $from"], [], workspace, [], [])
+        app = new(name, user, from, docker_run, s, nothing, ["FROM $from"], [], workspace, [], [], [])
         # If the app points to an already running container, we can already open a shell into it
         # TODO: have an 'open' method?
         if container_running(app)
@@ -332,6 +332,8 @@ function setup_container(app::App, user_run_args::String = "")
         Base.join(map(m -> Docker.mountstr(app.hostshell, m), app.mounts), ' '),
         # Ports
         Base.join(map(p -> Docker.portstr(app.hostshell, p), app.ports), ' '),
+        # Networks
+        Base.join(map(n -> Docker.networkstr(app.hostshell, n), app.networks), ' '),
         # User arguments
         user_run_args;
         # Container name and bash process to launch in the container

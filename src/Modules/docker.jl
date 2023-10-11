@@ -227,6 +227,17 @@ end
 export Port, portstr
 
 
+struct Network
+    name::String
+    function Network(name)
+        return new(name)
+    end
+end
+function networkstr(s::CLI.Shell, n::Network)::String
+    return "--net $(n.name)"
+end
+export Network, networkstr
+
 
 # Todo: Docker container run should return a Shell{Bash, Docker}
 # Or an attach fonction ?
