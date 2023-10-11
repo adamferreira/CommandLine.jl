@@ -48,31 +48,38 @@ end
 - `shell::Shell`: Shell on which docker commands will be launched
 """
 mutable struct App
+    # Name of the app to be deployed
     appname::String
+    # Username to use in the container
     user::String
+    # Base image name form wich creating ContainedEnv image
     baseimg::String
-    # Shell on host
+    # Command to be launched on the container as part of `Docker run` command
+    docker_run::String
+    # Shell on host (Shell on which docker commands will be launched)
     hostshell::CLI.Shell
     # Shell on container
     contshell::Union{Nothing, CLI.Shell}
-    # Decoke file content as a tape record
+    # Docker file content as a tape record
     dockerfile_record::Vector{String}
     # Package dependencies
     packages::Vector{Package}
-    # Workspace where all files (including Dockefile) wlll be copied before
-    # Copying to image
+    # Workspace where all files (including Dockefile) will be copied before copying to image
     workspace::String
     # List of mounts to be passed down to `Docker run`
     mounts::Vector{Docker.Mount}
     # List of port bindings to be passed down to `Docker run`
     ports::Vector{Docker.Port}
+    # List of network the app's container is connected to
+    #networks::
 
     function App(
         s::CLI.Shell;
         name,
         user,
         from,
-        workspace = Base.pwd()
+        workspace = Base.pwd(),
+        docker_run = "bash _l"
     )
         !isnothing(s["CL_DOCKER"]) || @error("Cannot find docker installation")
 
@@ -80,7 +87,7 @@ mutable struct App
         tmpdir = "containedenv_$(Base.hash(Base.hash(name), Base.hash(from)))"
         workspace = CLI.cygpath(s, Base.joinpath(workspace, tmpdir), "-u")
     
-        app = new(name, user, from, s, nothing, ["FROM $from"], [], workspace, [], [])
+        app = new(name, user, from, docker_run, s, nothing, ["FROM $from"], [], workspace, [], [])
         # If the app points to an already running container, we can already open a shell into it
         # TODO: have an 'open' method?
         if container_running(app)
@@ -141,14 +148,14 @@ home(app::App) = "/home/$(app.user)"
 function container_shell_cmd(app::App, usershell::Bool = true)::String
     if usershell
         cmd = Docker.exec_str(app.hostshell;
-            argument = "$(container_name(app)) bash -l",
+            argument = "$(container_name(app)) $(app.docker_run)",
             user = app.user,
             tty = true,
             interactive = true
         )
     else
         cmd = Docker.exec_str(app.hostshell;
-            argument = "$(container_name(app)) bash -l",
+            argument = "$(container_name(app)) $(app.docker_run)",
             user = app.user,
             tty = false,
             interactive = true
@@ -241,33 +248,6 @@ function clean_workspace(app::App)
     end
 end
 
-# ----- Step 0: init all boilerplate ---
-function init!(app::App)
-    # The begining of every containedenv is the same
-    COMMENT(app, "Setting up global env vars")
-    ENV(app, "USER", app.user)
-    ENV(app, "HOME", raw"/home/${USER}")
-    COMMENT(app, "Updating package manager")
-    RUN(app, "$(pkg_mgr(app)) update -y", "$(pkg_mgr(app)) upgrade -y")
-    RUN(app, "$(pkg_mgr(app)) install -y sudo")
-    COMMENT(app, "Setting up $(app.user) as a sudo user and create its home")
-    RUN(
-        app,
-        "useradd -r -m -U -G sudo -d $(home(app)) -s /bin/bash -c \"Docker SGE user\" $(app.user)",
-        "echo \"$(app.user) ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee /etc/sudoers.d/$(app.user)",
-        "chown -R $(app.user) $(home(app))",
-        "mkdir $(home(app))/projects",
-        "chown -R $(app.user) $(home(app))/*"
-    )
-    @assert !CLI.isdir(app.hostshell, app.workspace)
-    CLI.mkdir(app.hostshell, app.workspace)
-    @assert CLI.isdir(app.hostshell, app.workspace)
-
-    # Copy bash_profile (store in CommandLine module) to the container
-    #TODO: this seems to not work when CommandLine is installed as a package
-    COPY(app, Base.joinpath(@__DIR__, "bash_profile"), "$(home(app))/.bash_profile")
-end
-
 # ----- Step 1: local setup ---
 function setup_host(app::App)
     pkgs_done = Set{Package}()
@@ -344,8 +324,8 @@ function setup_container(app::App, user_run_args::String = "")
     # Delete previous container if it exists
     destroy_container(app)
 
-    # Start container (-l -> --login so that bash loads .bash_profile) 
-    container_command = "$(image_name(app)) bash -l"
+    # Start container 
+    container_command = "$(image_name(app)) $(app.docker_run)"
     Docker.run(
         app.hostshell,
         # Mounts
@@ -385,7 +365,7 @@ end
 
 function deploy!(app::App; clean_image = false, docker_run_args::String = "")
     try
-        init!(app)
+        #init!(app)
         setup_host(app)
         setup_image(app, clean_image)
         setup_container(app, docker_run_args)
@@ -410,4 +390,44 @@ export  Package, BasePackage,
 
 include("custom_packages.jl")
 export  JuliaLinux
+
+
+# App for dev container with pretty user_profile and Linux-based sudo user on the container
+function DevApp(
+    s::CLI.Shell;
+    name,
+    user,
+    from,
+    workspace = Base.pwd()
+)::App
+    # (bash -l -> --login so that bash loads .bash_profile)
+    app = App(s, name=name, user=user, from=from, workspace=workspace, docker_run="bash -l")
+    # Setup user as root user in the Linux container, and creates its home
+    # Also setup user profile file
+    COMMENT(app, "Setting up global env vars")
+    ENV(app, "USER", app.user)
+    ENV(app, "HOME", raw"/home/${USER}")
+    COMMENT(app, "Updating package manager")
+    RUN(app, "$(pkg_mgr(app)) update -y", "$(pkg_mgr(app)) upgrade -y")
+    RUN(app, "$(pkg_mgr(app)) install -y sudo")
+    COMMENT(app, "Setting up $(app.user) as a sudo user and create its home")
+    RUN(
+        app,
+        "useradd -r -m -U -G sudo -d $(home(app)) -s /bin/bash -c \"Docker SGE user\" $(app.user)",
+        "echo \"$(app.user) ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee /etc/sudoers.d/$(app.user)",
+        "chown -R $(app.user) $(home(app))",
+        "mkdir $(home(app))/projects",
+        "chown -R $(app.user) $(home(app))/*"
+    )
+    @assert !CLI.isdir(app.hostshell, app.workspace)
+    CLI.mkdir(app.hostshell, app.workspace)
+    @assert CLI.isdir(app.hostshell, app.workspace)
+
+    # Copy bash_profile (store in CommandLine module) to the container
+    #TODO: this seems to not work when CommandLine is installed as a package
+    COPY(app, Base.joinpath(@__DIR__, "bash_profile"), "$(home(app))/.bash_profile")
+    return app
+end
+
+export DevApp
 end
