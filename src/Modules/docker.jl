@@ -137,6 +137,23 @@ function container_exists(s::CLI.Shell, cname::String)
 end
 export container_exists
 
+function container_running(s::CLI.Shell, cname::String)::Bool
+    status = Docker.containers(s, "name=$(cname)")
+    return length(status) == 0 ? false : status[1]["State"] == "running"
+end
+export container_running
+
+function networks(s::CLI.Shell)::Vector{Dict}
+    # Silent calls for now and get output (save current handler)
+    savefct = s.handler
+    s.handler = CLI.checkoutput
+    out = network(s, "ls"; format="'{{json .}}'")
+    # Reset Shell to original state
+    s.handler = savefct
+    #TODO: encapsulate handler switch in a method call 'with handler?'
+    return JSON.parse.(out)
+end
+
 function get_image(s::CLI.Shell, imgname::String)::Union{Nothing, Dict}
     lock(s.run_mutex)
     # Silent calls for now and get output (save current handler)

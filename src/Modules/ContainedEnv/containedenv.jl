@@ -169,8 +169,7 @@ function container_shell_cmd(app::App, usershell::Bool = true)::String
 end
 
 function container_running(app::App)::Bool
-    status = Docker.containers(app.hostshell, "name=$(container_name(app))")
-    return length(status) == 0 ? false : status[1]["State"] == "running"
+    return Docker.container_running(app.hostshell, container_name(app))
 end
 
 function new_container_shell(app::App)::CLI.Shell
