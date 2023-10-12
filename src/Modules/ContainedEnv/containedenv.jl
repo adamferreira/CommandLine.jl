@@ -135,6 +135,10 @@ function add_port!(app::App, p::Docker.Port)
     push!(app.ports, p)
 end
 
+function add_network!(app::App, n::Docker.Network)
+    push!(app.networks, n)
+end
+
 # ---------------------------
 # Docker Wrapper
 # ---------------------------
