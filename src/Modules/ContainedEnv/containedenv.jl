@@ -97,6 +97,11 @@ mutable struct App
                 app.contshell = nothing
             end
         end
+        # Setup workspace directory
+        @assert !CLI.isdir(app.hostshell, app.workspace)
+        CLI.mkdir(app.hostshell, app.workspace)
+        @assert CLI.isdir(app.hostshell, app.workspace)
+
         return app
     end
 end
@@ -394,7 +399,7 @@ export  Package, BasePackage,
         container_shell_cmd, new_container_shell, container_running
 
 include("custom_packages.jl")
-export  JuliaLinux
+export  JuliaLinux, GitHubRepo
 
 
 # App for dev container with pretty user_profile and Linux-based sudo user on the container
@@ -424,10 +429,6 @@ function DevApp(
         "mkdir $(home(app))/projects",
         "chown -R $(app.user) $(home(app))/*"
     )
-    @assert !CLI.isdir(app.hostshell, app.workspace)
-    CLI.mkdir(app.hostshell, app.workspace)
-    @assert CLI.isdir(app.hostshell, app.workspace)
-
     # Copy bash_profile (store in CommandLine module) to the container
     #TODO: this seems to not work when CommandLine is installed as a package
     COPY(app, Base.joinpath(@__DIR__, "bash_profile"), "$(home(app))/.bash_profile")
