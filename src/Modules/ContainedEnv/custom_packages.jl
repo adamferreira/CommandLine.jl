@@ -103,3 +103,42 @@ function JuliaLinux(version::String = "1.8.0-rc1")::Package
         ]
     )
 end
+
+function GitHubRepo(
+    repourl::String, user::String, usermail::String;
+    on::Symbol = :image,
+    dest::String = ""
+)::Package
+    on_host = nothing
+    on_image = nothing
+    on_container = nothing
+
+    if on == :host
+        on_host = app -> begin
+            # Clone git repo locally
+            
+        end
+    end
+
+    if on == :image
+        on_image = app -> begin
+            RUN(
+                app,
+                "git clone $(repourl)",
+                "git config --local user.name $(user)",
+                "git config --local user.email $(usermail)"
+            )
+        end
+    end
+
+    return Package(
+        "GitHubRepo", "$(repourl)";
+        install_host = on == :host ? on_host : nothing,
+        install_image = on == :image ? on_image : nothing,
+        install_container = on == :container ? on_container : nothing,
+        requires = [
+            BasePackage("git")
+        ]
+    )
+
+end

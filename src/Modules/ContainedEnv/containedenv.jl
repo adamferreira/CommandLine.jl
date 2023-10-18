@@ -381,13 +381,13 @@ function deploy!(app::App; clean_image = false, docker_run_args::String = "")
         setup_container(app, docker_run_args)
     catch e
         # If anything goes wrong, remove everything related to the app
-        clean_workspace(app)
+        #clean_workspace(app)
         destroy_container(app)
         destroy_image(app)
         rethrow(e)
     finally
         # Destroy temporary workspace now that everything is setup
-        clean_workspace(app)
+        #clean_workspace(app)
     end
 end
 
