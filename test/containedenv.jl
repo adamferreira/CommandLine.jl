@@ -44,8 +44,15 @@ fakepkg1 = ContainedEnv.Package("fakepkg1", "v0";
     end
 )
 ContainedEnv.add_pkg!(app, fakepkg1)
+# Mount volumes
+ContainedEnv.add_mount!(app, Docker.Mount(:hostpath, @__DIR__, ContainedEnv.home(app)*"/mountdir"))
+# Ports
+ContainedEnv.add_port!(app, Docker.Port("8080", "80"))
+# Networks
+#ContainedEnv.add_network!(app, Docker.Network("my_network"))
 
 # Package that depends on other packages
 
+
 # Setup app
-ContainedEnv.setup(app)
+ContainedEnv.deploy!(app)

@@ -399,7 +399,7 @@ export  Package, BasePackage,
         container_shell_cmd, new_container_shell, container_running
 
 include("custom_packages.jl")
-export  JuliaLinux, GitHubRepo
+export  JuliaLinux, GitHubRepo, CommandLineDev
 
 
 # App for dev container with pretty user_profile and Linux-based sudo user on the container

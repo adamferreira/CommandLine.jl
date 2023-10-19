@@ -105,40 +105,64 @@ function JuliaLinux(version::String = "1.8.0-rc1")::Package
 end
 
 function GitHubRepo(
-    repourl::String, user::String, usermail::String;
-    on::Symbol = :image,
-    dest::String = ""
+    repo_url::String, user::String, usermail::String, github_token::String;
+    clone_on::Symbol = :image,
+    workspace::String = "~/projects",
 )::Package
     on_host = nothing
     on_image = nothing
     on_container = nothing
 
-    if on == :host
-        on_host = app -> begin
-            # Clone git repo locally
-            
-        end
+    repo_name = replace(Base.basename(repo_url), ".git" => "")
+    #TODO support \\?
+    repo_dest = "$(workspace)/$(repo_name)"
+    credentials_file = "$(repo_dest)/.git/.my_gh_credentials"
+
+    # TODO: handle repo on host
+    on_host = app -> begin
     end
 
-    if on == :image
+    if clone_on == :image
         on_image = app -> begin
             RUN(
                 app,
-                "git clone $(repourl)",
+                # Clone repo in image
+                "git clone $(repo_url) $(repo_dest)",
+                # Trust repo and user
+                "git config --global --add safe.directory $(repo_dest)",
+                "chown -R $(app.user) $(repo_dest)",
+                # Configure user credentials
+                "cd $(repo_dest)",
                 "git config --local user.name $(user)",
-                "git config --local user.email $(usermail)"
+                "git config --local user.email $(usermail)",
+                # Configure credentials file location
+                "git config --local credential.helper 'store --file $(credentials_file)'"
             )
         end
     end
 
+    on_container = app -> begin
+        # Create a git credentials file from the github token as runtime inside the container
+        # There is no trace of the token in the image!
+        CLI.checkoutput(app.contshell, "echo 'https://$(user):$(github_token)@github.com' >> $(credentials_file)")
+    end
+
     return Package(
-        "GitHubRepo", "$(repourl)";
-        install_host = on == :host ? on_host : nothing,
-        install_image = on == :image ? on_image : nothing,
-        install_container = on == :container ? on_container : nothing,
+        "GitHubRepo", "$(repo_url)";
+        install_host = on_host,
+        install_image = on_image,
+        install_container = on_container,
         requires = [
             BasePackage("git")
         ]
     )
+end
 
+function CommandLineDev(user::String, usermail::String, github_token::String)::Package
+    return GitHubRepo(
+        "https://github.com/adamferreira/CommandLine.jl.git",
+        user, usermail, github_token;
+        clone_on = :image,
+        workspace = "~/projects"
+    )
 end
