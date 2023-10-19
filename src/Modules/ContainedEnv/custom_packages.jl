@@ -153,7 +153,7 @@ function GitHubRepo(
         install_image = on_image,
         install_container = on_container,
         requires = [
-            BasePackage("git")
+            BasePackage("git"), BasePackage("ca-certificates")
         ]
     )
 end
