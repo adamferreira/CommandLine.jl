@@ -43,11 +43,6 @@ NC='\[\e[0m\]' # No Color
 
 PS1="${LIGHTBLUE}\\u${PURPLE}@${DARKCUSTOMCOLORMIX}\h: ${BOLDYELLOW}[\\w] ${PURPLE}\$(parse_git_branch)${DARKCUSTOMCOLORMIX}$ ${NC}"
 
-list_detailed_more()
-{
-	ls -lah $1 | more
-}
-
 parse_git_branch() {
  git branch 2> /dev/null | sed -e '/^[^*]/d' -e 's/* \(.*\)/(\1)/'
 }
@@ -104,3 +99,4 @@ safe_rm()
 ###############################
 ##         Aliases           ##
 ###############################
+alias gitlog="git log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative"

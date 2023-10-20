@@ -208,13 +208,16 @@ end
 # Image related
 # ---------------------------
 
+function image_exist(app::App)
+    image = Docker.get_image(app.hostshell, image_name(app))
+    return !isnothing(image)
+end
+
 function destroy_image(app::App)
     image = Docker.get_image(app.hostshell, image_name(app))
-    # Image already destroyed
     if isnothing(image)
         return nothing
     end
-
     Docker.image(app.hostshell, "rm"; argument = image["ID"], force=true)
 end
 
@@ -279,12 +282,10 @@ function setup_image(app::App, regenerate_image::Bool)
     # Delete container before destroying related image
     destroy_container(app)
 
-
-
     # Delete previous image if it exists
     if regenerate_image
         destroy_image(app)
-    else
+    elseif image_exist(app)
         # Stop, proceed to container building
         return nothing
     end
