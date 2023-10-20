@@ -273,15 +273,20 @@ function setup_host(app::App)
 end
 
 # ----- Step 2: image setup ---
-function setup_image(app::App, clean_image)
+function setup_image(app::App, regenerate_image::Bool)
     pkgs_done = Set{Package}()
 
     # Delete container before destroying related image
     destroy_container(app)
 
+
+
     # Delete previous image if it exists
-    if clean_image
+    if regenerate_image
         destroy_image(app)
+    else
+        # Stop, proceed to container building
+        return nothing
     end
 
     # Run base packages installation in one line to save layer count
@@ -373,11 +378,14 @@ function setup_container(app::App, user_run_args::String = "")
     println("Container for app $(app.appname) is ready, you can enter the container with command $(container_shell_cmd(app, true))")
 end
 
-function deploy!(app::App; clean_image = false, docker_run_args::String = "")
+"""
+- `regenerate_image::Bool`: Skip image construction and use existing image for `app`
+"""
+function deploy!(app::App; regenerate_image::Bool = true, docker_run_args::String = "")
     try
         #init!(app)
         setup_host(app)
-        setup_image(app, clean_image)
+        setup_image(app, regenerate_image)
         setup_container(app, docker_run_args)
     catch e
         # If anything goes wrong, remove everything related to the app
