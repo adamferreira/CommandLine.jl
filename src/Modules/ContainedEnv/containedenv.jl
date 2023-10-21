@@ -284,8 +284,10 @@ function setup_image(app::App, regenerate_image::Bool)
 
     # Delete previous image if it exists
     if regenerate_image
-        destroy_image(app)
-    elseif image_exist(app)
+        if image_exist(app)
+            destroy_image(app)
+        end
+    else
         # Stop, proceed to container building
         return nothing
     end
@@ -438,9 +440,19 @@ function DevApp(
         "mkdir $(home(app))/projects",
         "chown -R $(app.user) $(home(app))/*"
     )
+
     # Copy bash_profile (store in CommandLine module) to the container
-    #TODO: this seems to not work when CommandLine is installed as a package
-    COPY(app, Base.joinpath(@__DIR__, "bash_profile"), "$(home(app))/.bash_profile")
+    # Also format it to unix format
+    bash_profile = Package(
+        "bash_profile", from,
+        install_image = app -> begin
+            COPY(app, Base.joinpath(@__DIR__, "bash_profile"), "$(home(app))/.bash_profile")
+            RUN(app, "dos2unix $(home(app))/.bash_profile")
+        end,
+        requires = [BasePackage("dos2unix")]
+    )
+
+    add_pkg!(app, bash_profile)
     return app
 end
 
