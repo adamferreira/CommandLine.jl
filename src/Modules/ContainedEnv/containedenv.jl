@@ -400,6 +400,7 @@ function deploy!(app::App; regenerate_image::Bool = true, docker_run_args::Strin
         # Destroy temporary workspace now that everything is setup
         clean_workspace(app)
     end
+    
 end
 
 

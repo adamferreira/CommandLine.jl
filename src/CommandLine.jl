@@ -91,7 +91,9 @@ end
 # --------------------
 # Sub-Modules
 # --------------------
+include("Modules/common.jl") # Util `make_cmd`
 include("Modules/docker.jl")
+include("Modules/git.jl")
 include("Modules/ContainedEnv/containedenv.jl")
 
 # Precompile CommandLine package
