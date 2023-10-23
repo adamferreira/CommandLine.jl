@@ -54,6 +54,8 @@ mutable struct App
     user::String
     # Base image name form wich creating ContainedEnv image
     baseimg::String
+    # Home directory for this app
+    home::CLI.AbstractPath
     # Command to be launched on the container as part of `Docker run` command
     docker_run::String
     # Shell on host (Shell on which docker commands will be launched)
@@ -86,8 +88,15 @@ mutable struct App
         # Create temporary workspace for this app (posix path form)
         tmpdir = "containedenv_$(Base.hash(Base.hash(name), Base.hash(from)))"
         workspace = CLI.cygpath(s, Base.joinpath(workspace, tmpdir), "-u")
+
+        # Guess pathtype from image name
+        # TODO: Get pathtype from Shell `s` ?
+        ptype = occursin("Windows", from) ? CLI.WindowsPath : CLI.PosixPath
+        # Set home depending on the OS
+        #TODO: support MacOS
+        home =  ptype == CLI.PosixPath ? CLI.PosixPath("/home/$(user)") : CLI.WindowsPath("C:", "Users", user)
     
-        app = new(name, user, from, docker_run, s, nothing, ["FROM $from"], [], workspace, [], [], [])
+        app = new(name, user, from, home, docker_run, s, nothing, ["FROM $from"], [], workspace, [], [], [])
         # If the app points to an already running container, we can already open a shell into it
         # TODO: have an 'open' method?
         if container_running(app)
@@ -149,7 +158,13 @@ end
 # ---------------------------
 container_name(app::App) = "$(app.appname)_ctn"
 image_name(app::App) = "$(app.appname)_img"
-home(app::App) = "/home/$(app.user)"
+
+# ---------------------------
+# Utilitaries
+# ---------------------------
+pathtype(app::App)::Type{CLI.AbstractPath} = type(app.home)
+home(app::App)::CLI.AbstractPath = app.home
+projects(app::App)::CLI.AbstractPath = CLI.joinpath(home(app), "projects")
 
 # ---------------------------
 # Container related
@@ -410,7 +425,7 @@ export  Package, BasePackage,
         container_shell_cmd, new_container_shell, container_running
 
 include("custom_packages.jl")
-export  JuliaLinux, GitHubRepo, CommandLineDev
+export  JuliaLinux
 
 
 # App for dev container with pretty user_profile and Linux-based sudo user on the container
@@ -437,7 +452,7 @@ function DevApp(
         "useradd -r -m -U -G sudo -d $(home(app)) -s /bin/bash -c \"Docker SGE user\" $(app.user)",
         "echo \"$(app.user) ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee /etc/sudoers.d/$(app.user)",
         "chown -R $(app.user) $(home(app))",
-        "mkdir $(home(app))/projects",
+        "mkdir $(projects(app))",
         "chown -R $(app.user) $(home(app))/*"
     )
 
@@ -446,7 +461,7 @@ function DevApp(
     bash_profile = Package(
         "bash_profile", from,
         install_image = app -> begin
-            COPY(app, Base.joinpath(@__DIR__, "bash_profile"), "$(home(app))/.bash_profile")
+            COPY(app, Base.joinpath(@__DIR__, "bash_profile"), CLI.joinpath(home(app), ".bash_profile"))
             RUN(app, "dos2unix $(home(app))/.bash_profile")
         end,
         requires = [BasePackage("dos2unix")]
