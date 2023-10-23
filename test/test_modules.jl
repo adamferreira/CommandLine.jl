@@ -67,3 +67,7 @@ end
     m = Docker.Mount(:hostpath, "path\\on\\host", "path\\in\\container")
     compare_string(Docker.mountstr(s, m), "-v path/on/host:path/in/container")
 end
+
+@testset "Test Git Command Generation" begin
+    
+end
