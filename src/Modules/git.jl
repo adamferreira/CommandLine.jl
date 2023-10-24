@@ -60,7 +60,7 @@ SUB_COMMANDS = [
     :branch, # List, create, or delete branches
     :bundle, # Move objects and refs by archive
     :checkout, # Switch branches or restore working tree files
-    :cherry-pick, # Apply the changes introduced by some existing commits
+    :cherry_pick, # Apply the changes introduced by some existing commits
     :citool, # Graphical alternative to :commit
     :clean, # Remove untracked files from the working tree
     :clone, # Clone a repository into a new directory
@@ -68,7 +68,7 @@ SUB_COMMANDS = [
     :describe, # Give an object a human readable name based on an available ref
     :diff, # Show changes between commits, commit and working tree, etc
     :fetch, # Download objects and refs from another repository
-    :format-patch, # Prepare patches for e-mail submission
+    :format_patch, # Prepare patches for e-mail submission
     :gc, # Cleanup unnecessary files and optimize the local repository
     :grep, # Print lines matching a pattern
     :gui, # A portable graphical interface to Git
@@ -80,7 +80,7 @@ SUB_COMMANDS = [
     :notes, # Add or inspect object notes
     :pull, # Fetch from and integrate with another repository or a local branch
     :push, # Update remote refs along with associated objects
-    :range-diff, # Compare two commit ranges (e.g. two versions of a branch)
+    :range_diff, # Compare two commit ranges (e.g. two versions of a branch)
     :rebase, # Reapply commits on top of another base tip
     :reset, # Reset current HEAD to the specified state
     :restore, # Restore working tree files
@@ -88,7 +88,7 @@ SUB_COMMANDS = [
     :rm, # Remove files from the working tree and from the index
     :shortlog, # Summarize git log output
     :show, # Show various types of objects
-    :sparse-checkout, # Reduce your working tree to a subset of tracked files
+    :sparse_checkout, # Reduce your working tree to a subset of tracked files
     :stash, # Stash the changes in a dirty working directory away
     :status, # Show the working tree status
     :submodule, # Initialize, update or inspect submodules
@@ -97,11 +97,11 @@ SUB_COMMANDS = [
     :worktree, # Manage multiple working trees
     # Manipulators:
     :config, # Get and set repository or global options
-    :fast-export, # Git data exporter
-    :fast-import, # Backend for fast Git data importers
-    :filter-branch, # Rewrite branches
+    :fast_export, # Git data exporter
+    :fast_import, # Backend for fast Git data importers
+    :filter_branch, # Rewrite branches
     :mergetool, # Run merge conflict resolution tools to resolve merge conflicts
-    :pack-refs, # Pack heads and tags for efficient repository access
+    :pack_refs, # Pack heads and tags for efficient repository access
     :prune, # Prune all unreachable objects from the object database
     :reflog, # Manage reflog information
     :remote, # Manage set of tracked repositories
@@ -111,17 +111,17 @@ SUB_COMMANDS = [
     :annotate, # Annotate file lines with commit information
     :blame, # Show what revision and author last modified each line of a file
     :bugreport, # Collect information for user to file a bug report
-    :count-objects, # Count unpacked number of objects and their disk consumption
+    :count_objects, # Count unpacked number of objects and their disk consumption
     :diagnose, # Generate a zip archive of diagnostic information
     :difftool, # Show changes using common diff tools
     :fsck, # Verifies the connectivity and validity of the objects in the database
     :help, # Display help information about Git
     :instaweb, # Instantly browse your working repository in gitweb
-    :merge-tree, # Perform merge without touching index or working tree
+    :merge_tree, # Perform merge without touching index or working tree
     :rerere, # Reuse recorded resolution of conflicted merges
-    :show-branch, # Show branches and their commits
-    :verify-commit, # Check the GPG signature of commits
-    :verify-tag, # Check the GPG signature of tags
+    :show_branch, # Show branches and their commits
+    :verify_commit, # Check the GPG signature of commits
+    :verify_tag, # Check the GPG signature of tags
     :version # Display version information about Git
 ]
 
