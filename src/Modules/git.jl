@@ -1,7 +1,10 @@
+
+
+
 """
 function git_status(session::AbstractBashSession, path; git = "git")
     CommandLine.cd(session, path)
-    lines = CommandLine.checkoutput(session, "$(git) status --short")
+    lines = CommandLine.checkoutput(session, "(git) status --short")
     CommandLine.cd(session, "-")
     return lines
 end
@@ -28,7 +31,7 @@ function changes_from(session::AbstractBashSession, path; git = "git", branch = 
         return (X in ['M', 'A'])
     end
     CommandLine.cd(session, path)
-    lines = CommandLine.checkoutput(session, "$(git) diff --name-status $(branch)")
+    lines = CommandLine.checkoutput(session, "(git) diff --name-status (branch)")
     CommandLine.cd(session, "-")
     return [replace(line[2:end], '\t' => "") for line in lines if is_change(line)]
 end
@@ -37,13 +40,13 @@ end
 #Get all tracked files in branch `branch` of git repository `path` is session `session`
 function tracked_files(session::AbstractBashSession, path; git = "git", branch = "master")::Vector{String}
     CommandLine.cd(session, path)
-    lines = CommandLine.checkoutput(session, "$(git) ls-tree --full-tree --name-only -r $(branch)")
+    lines = CommandLine.checkoutput(session, "(git) ls-tree --full-tree --name-only -r (branch)")
     CommandLine.cd(session, "-")
     return lines
 end
 """
 
-module Docker
+module Git
 import CommandLine as CLI
 
 """
@@ -130,7 +133,7 @@ SUB_COMMANDS = [
 for fct in SUB_COMMANDS
     @eval function $(Symbol(fct, :_str))(s::CLI.Shell, args...; kwargs...)
         strfct = string($fct)
-        return "$(s[:CL_GIT]) $strfct $(make_cmd(args...; kwargs...))"
+        return "$(s[:CL_GIT]) $strfct $(CLI.make_cmd(args...; kwargs...))"
     end
 
     @eval function $fct(s::CLI.Shell, args...; kwargs...)

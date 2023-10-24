@@ -69,5 +69,11 @@ end
 end
 
 @testset "Test Git Command Generation" begin
-    
+    s = CLI.LocalGitBash(;pwd = "~", env = Dict{String, String}(), handler = get_command)
+    s["CL_GIT"] = "git"
+    compare_string(Git.status(s), "git status")
+    compare_string(
+        Git.clone(s; branch="debug", depth=2, sparse=true, argument="my_repo"),
+        "git clone --branch debug --depth 2 --sparse my_repo"
+    )
 end

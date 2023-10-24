@@ -71,7 +71,7 @@ SUB_COMMANDS = [
 for fct in SUB_COMMANDS
     @eval function $(Symbol(fct, :_str))(s::CLI.Shell, args...; kwargs...)
         strfct = string($fct)
-        return "$(s[:CL_DOCKER]) $strfct $(make_cmd(args...; kwargs...))"
+        return "$(s[:CL_DOCKER]) $strfct $(CLI.make_cmd(args...; kwargs...))"
     end
 
     @eval function $fct(s::CLI.Shell, args...; kwargs...)
