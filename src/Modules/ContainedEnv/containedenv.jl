@@ -274,25 +274,44 @@ function clean_workspace(app::App)
     end
 end
 
+# ----- Step 0: local setup (dummy recursive depth-first search) ---
+function packages_queue(app::App)
+    pkg_queue = Vector{Package}()
+    pkgs_done = Set{Package}()
+    # First, the base packages
+    base_pkg = filter(p -> p.tag == "base", app.packages)
+    function inspect_package(p::Package)
+        for pp in p.dependencies
+            inspect_package(pp)
+        end
+        # Only install packages once!
+        if !(p in pkgs_done) && !(p.tag == "base")
+            push!(pkg_queue, p)
+            push!(pkgs_done, p) 
+        end
+    end
+
+    # width search
+    for p in app.packages
+        inspect_package(p)
+    end
+
+    return base_pkg, pkg_queue
+end
+
 # ----- Step 1: local setup ---
 function setup_host(app::App)
-    pkgs_done = Set{Package}()
-
     # Run packages's host step callback
     map(p -> begin
-        if !(p in pkgs_done)
-            if !isnothing(p.install_host)
-                p.install_host(app)
-            end
-            push!(pkgs_done, p)
+        if !isnothing(p.install_host)
+            p.install_host(app)
         end
-        end, app.packages
-    )
+    end, vcat(packages_queue(app)...))
 end
 
 # ----- Step 2: image setup ---
 function setup_image(app::App, regenerate_image::Bool)
-    pkgs_done = Set{Package}()
+    base_pkg, pkg_queue = packages_queue(app)
 
     # Delete container before destroying related image
     destroy_container(app)
@@ -308,31 +327,24 @@ function setup_image(app::App, regenerate_image::Bool)
     end
 
     # Run base packages installation in one line to save layer count
-    # Only install package once!
-    map(p -> begin
-        push!(pkgs_done, p)
-        end, filter(p -> p.tag == "base", app.packages)
-    )
     COMMENT(app, "Installing base packages")
-    RUN(app, "$(pkg_mgr(app)) install -y " * Base.join(map(p -> p.name, collect(pkgs_done)), ' '))
+    # TODO remove
+    RUN(app, "$(pkg_mgr(app)) update -y", "$(pkg_mgr(app)) upgrade -y")
+    RUN(app, "$(pkg_mgr(app)) install -y " * Base.join(map(p -> p.name, collect(base_pkg)), ' '))
 
     # Run packages's image step callback
     map(p -> begin
-        if !(p in pkgs_done)
-            if !isnothing(p.install_image)
-                COMMENT(app, "--------------- Installing package $(p.name)#$(p.tag)")
-                p.install_image(app)
-                COMMENT(app, "---------------")
-            end
-            push!(pkgs_done, p)
+        if !isnothing(p.install_image)
+            COMMENT(app, "--------------- Installing package $(p.name)#$(p.tag)")
+            p.install_image(app)
+            COMMENT(app, "---------------")
         end
-        end, app.packages
-    )
+    end, pkg_queue)
 
     # Now work on the App's temporary workspace
     CLI.indir(app.hostshell, app.workspace) do shell
         # Write Dockerfile #TODO do not put -w
-        host_workspace = CLI.cygpath(app.hostshell, app.workspace, "-w")
+        host_workspace = CLI.cygpath(shell, app.workspace, "-w")
         open(Base.joinpath(host_workspace, "Dockerfile"), "w+") do file
             for line in app.dockerfile_record
                 write(file, line * "\n")
@@ -342,11 +354,22 @@ function setup_image(app::App, regenerate_image::Bool)
         end
 
         # Build image
-        Docker.image(app.hostshell,
-            "build";
-            tag = image_name(app),
-            argument =  "." # Local Dockerfile in the temporary workspace
-        )
+        # Docker < 23.0 : docker image build --tag monimage .
+        # Docker > 23.0 : docker buildx build --tag monimage .
+        DOCKERVER = 22.0
+        if DOCKERVER > 23.0
+            Docker.buildx(shell,
+                "build";
+                tag = image_name(app),
+                argument =  "." # Local Dockerfile in the temporary workspace
+            )
+        else
+            Docker.image(shell,
+                "build";
+                tag = image_name(app),
+                argument =  "." # Local Dockerfile in the temporary workspace
+            )
+        end
     end
 end
 
@@ -380,20 +403,13 @@ function setup_container(app::App, user_run_args::String = "")
     # Now that the container is running, we can create a Shell session in it
     app.contshell = new_container_shell(app)
 
-    pkgs_done = Set{Package}()
-
     # Run packages's container step callback
     map(p -> begin
-        if !(p in pkgs_done)
-            if !isnothing(p.install_container)
-                p.install_container(app)
-            end
-            push!(pkgs_done, p)
+        if !isnothing(p.install_container)
+            p.install_container(app)
         end
-        end, app.packages
-    )
-
-    println("Container for app $(app.appname) is ready, you can enter the container with command $(container_shell_cmd(app, true))")
+    end, vcat(packages_queue(app)...))
+    println("Container for app $(app.appname) is ready, you can enter the container with command `$(container_shell_cmd(app, true))`")
 end
 
 """
@@ -420,10 +436,10 @@ end
 
 
 export  Package, BasePackage,
-        App, ENV, COPY, RUN, 
-        add_pkg!, add_mount!, add_port!, deploy!, 
+        App, ENV, COPY, RUN,
+        add_pkg!, add_mount!, add_port!, deploy!,
         home,
-        container_shell_cmd, new_container_shell, container_running
+        container_shell_cmd, new_container_shell, container_running, packages_queue
 
 include("custom_packages.jl")
 export  JuliaLinux

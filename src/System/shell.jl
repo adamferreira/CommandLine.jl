@@ -291,9 +291,9 @@ function run_with(s::Shell, cmd::Union{Base.Cmd, String}, stdout_cb::Union{Funct
     err::String = ""
     status = CommandLine.run_with(s, cmd;
         newline_out = x -> stdout_cb(x),
-        newline_err = x -> err = err * x
+        newline_err = x -> err = err * '\n' * x
     )
-    (status != 0) && throw(Base.IOError("$err", status))
+    (status != 0) && throw(Base.IOError("Error running `$cmd` \n$err", status))
     return status
 end
 
