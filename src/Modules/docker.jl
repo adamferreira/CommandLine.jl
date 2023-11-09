@@ -232,7 +232,7 @@ function get_image(s::CLI.Shell, imgname::String)::Union{Nothing, Dict}
     # Scrap outputs of `docker image ls`
     out = images(s, imgname; format="'{{json .}}'")
 
-    if length(out) == 0 
+    if length(out) == 0
         return nothing
     end
 
@@ -244,13 +244,27 @@ function get_image(s::CLI.Shell, imgname::String)::Union{Nothing, Dict}
 end
 export get_image
 
-function version()::Union{Nothing, Dict}
-   out = version(s; format="'{{json .}}'")
-    if length(out) == 0 
-        return nothing
-    end
-    return JSON.parse(out[1])
+function json_version(s::CLI.Shell)::Dict
+    lock(s.run_mutex)
+    # Silent calls for now and get output (save current handler)
+    savefct = s.handler
+    s.handler = CLI.checkoutput
+
+    vstr = version(s; format="'{{json .}}'")
+
+    # Reset Shell to original state
+    s.handler = savefct
+    unlock(s.run_mutex)
+
+    return JSON.parse(vstr[1])
 end
+
+function client_version(s::CLI.Shell)::Tuple{Int,Int,Int}
+    vjson = json_version(s)
+    m = match(r"(?<MAJOR>\d*)\.(?<MINOR>\d*)\.(?<PATCH>\d*)", vjson["Client"]["Version"])
+    return parse(Int, m["MAJOR"]), parse(Int, m["MINOR"]), parse(Int, m["PATCH"])
+end
+export client_version
 
 """
     Mount

@@ -2,7 +2,7 @@
 function JuliaLinux(version::String = "1.8.0-rc1")::Package
     # SOURCE: https://github.com/docker-library/julia/blob/3eb14343427c06437c5eda730ce8df1aeff5eb36/1.8-rc/bullseye/Dockerfile
     # For example 1.8.0-rdc -> NAME = "-rdc"
-    m = match(r"(?<MAJOR>\d)\.(?<MINOR>\d)\.(?<PATCH>\d)(?<NAME>\-[\w]*)*", version)
+    m = match(r"(?<MAJOR>\d*)\.(?<MINOR>\d*)\.(?<PATCH>\d*)(?<NAME>\-[\w]*)*", version)
     short_version = m["MAJOR"] * '.' * m["MINOR"]
     sha256_url = "https://julialang-s3.julialang.org/bin/checksums/julia-$(version).sha256"
     # Mapping sha256 and julia binaries url per architectures
@@ -104,7 +104,7 @@ function JuliaLinux(version::String = "1.8.0-rc1")::Package
     )
 end
 
-function GitHubRepo(
+function __GitHubRepo(
     repo_url::String, user::String, usermail::String, github_token::String;
     clone_on::Symbol = :image,
     workspace::String = "~/projects",
@@ -120,6 +120,7 @@ function GitHubRepo(
 
     # TODO: handle repo on host
     on_host = app -> begin
+
     end
 
     if clone_on == :image
@@ -159,7 +160,7 @@ function GitHubRepo(
 end
 
 function CommandLineDev(user::String, usermail::String, github_token::String)::Package
-    return GitHubRepo(
+    return __GitHubRepo(
         "https://github.com/adamferreira/CommandLine.jl.git",
         user, usermail, github_token;
         clone_on = :image,
