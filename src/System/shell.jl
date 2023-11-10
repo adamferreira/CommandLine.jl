@@ -293,7 +293,7 @@ function run_with(s::Shell, cmd::Union{Base.Cmd, String}, stdout_cb::Union{Funct
         newline_out = x -> stdout_cb(x),
         newline_err = x -> err = err * '\n' * x
     )
-    (status != 0) && throw(Base.IOError("Error running `$cmd` \n$err", status))
+    (status != 0) && throw(Base.IOError("Error running `$cmd`\n$err", status))
     return status
 end
 
