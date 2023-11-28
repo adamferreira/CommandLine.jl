@@ -520,6 +520,8 @@ function DevApp(
             COMMENT(app, "Setting up global env vars")
             ENV(app, "USER", ContainedEnv.user(app))
             ENV(app, "HOME", raw"/home/${USER}")
+            RUN(app, "$(pkg_mgr(app)) update -y", "$(pkg_mgr(app)) upgrade -y")
+            RUN(app, "$(pkg_mgr(app)) install -y sudo")
             COMMENT(app, "Setting up $(ContainedEnv.user(app)) as a sudo user and create its home")
             RUN(
                 app,
@@ -530,7 +532,7 @@ function DevApp(
                 "chown -R $(ContainedEnv.user(app)) $(home(app))/*"
             )
         end,
-        requires = [BasePackage("sudo")]
+        requires = []#BasePackage("sudo")]
     )
 
     # Copy bash_profile (store in CommandLine module) to the container
