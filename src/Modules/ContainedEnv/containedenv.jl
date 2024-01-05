@@ -317,9 +317,9 @@ function packages_queue(app::App)
             inspect_package(pp)
         end
         # Only install packages once!
-        if !(p in pkgs_done) && !(p.tag == "base")
-            push!(pkg_queue, p)
-            push!(pkgs_done, p) 
+        if !(p in pkgs_done)
+            p.tag == "base" ? push!(base_pkg, p) : push!(pkg_queue, p)
+            push!(pkgs_done, p)
         end
     end
 
@@ -360,7 +360,6 @@ function setup_image(app::App, regenerate_image::Bool)
 
     # Run base packages installation in one line to save layer count
     COMMENT(app, "Installing base packages")
-    # TODO remove
     RUN(app, "$(pkg_mgr(app)) update -y", "$(pkg_mgr(app)) upgrade -y")
     RUN(app, "$(pkg_mgr(app)) install -y " * Base.join(map(p -> p.name, collect(base_pkg)), ' '))
 
@@ -413,6 +412,26 @@ function setup_container(app::App, user_run_args::String)
     # Start container 
     container_command = "$(image_name(app)) $(app.docker_run)"
     Docker.run(
+        app.hostshell,
+        # Mounts
+        Base.join(map(m -> Docker.mountstr(app.hostshell, m), app.mounts), ' '),
+        # Ports
+        Base.join(map(p -> Docker.portstr(app.hostshell, p), app.ports), ' '),
+        # Networks
+        Base.join(map(n -> Docker.networkstr(app.hostshell, n), app.networks), ' '),
+        # User arguments
+        user_run_args;
+        # Container name and bash process to launch in the container
+        argument = container_command,
+        # Name of the container to be launched
+        name = container_name(app),
+        hostname = app.appname,
+        user = user(app),
+        tty = true,
+        detach = true
+    )
+
+    cmd = Docker.run_str(
         app.hostshell,
         # Mounts
         Base.join(map(m -> Docker.mountstr(app.hostshell, m), app.mounts), ' '),

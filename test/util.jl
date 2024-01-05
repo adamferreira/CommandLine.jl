@@ -30,10 +30,9 @@ s["CL_DOCKER"] = "docker"
 # Required on GitBash, otherwise docker mounts does not work (path are messed up) !
 CLI.run(s, "export MSYS_NO_PATHCONV=1")
 app = ContainedEnv.DevApp(s; name = "julia", user = "aferreira", from = "ubuntu:22.04")
-
 ContainedEnv.add_pkg!(app, ContainedEnv.JuliaLinux("1.9.1"))
 ContainedEnv.add_mount!(app, Docker.Mount(:hostpath, @__DIR__, ContainedEnv.home(app)*"/mountdir"))
 ContainedEnv.add_port!(app, Docker.Port("8080", "80"))
-#ContainedEnv.add_network!(app, Docker.Network("my_network"))
+ContainedEnv.add_network!(app, Docker.Network("my_network"))
 ContainedEnv.deploy!(app)
-ContainedEnv.container_running(app)
+#ContainedEnv.container_running(app)
