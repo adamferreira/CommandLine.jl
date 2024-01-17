@@ -33,8 +33,9 @@ struct Package
 end
 
 BasePackage(pname::String) = Package(pname, "base")
-
+# Overloads for Set{Package}
 Base.hash(p::Package) = Base.hash(Base.hash(p.name), Base.hash(p.tag))
+Base.isequal(a::Package, b::Package) = Base.isequal(Base.hash(a), Base.hash(b))
 function parse_pkg(p::String)
     m = match(r"(?<name>[\w]+)#(?<tag>[\w]*)", p)
     return Package(m["name"], m["tag"])
@@ -311,7 +312,7 @@ function packages_queue(app::App)
     pkg_queue = Vector{Package}()
     pkgs_done = Set{Package}()
     # First, the base packages
-    base_pkg = filter(p -> p.tag == "base", app.packages)
+    base_pkg = Set{Package}()
     function inspect_package(p::Package)
         for pp in p.dependencies
             inspect_package(pp)
@@ -333,12 +334,13 @@ end
 
 # ----- Step 1: local setup ---
 function setup_host(app::App)
+    base_pkg, pkg_queue = packages_queue(app)
     # Run packages's host step callback
     map(p -> begin
         if !isnothing(p.install_host)
             p.install_host(app)
         end
-    end, vcat(packages_queue(app)...))
+    end, pkg_queue)
 end
 
 # ----- Step 2: image setup ---
@@ -360,7 +362,8 @@ function setup_image(app::App, regenerate_image::Bool)
 
     # Run base packages installation in one line to save layer count
     COMMENT(app, "Installing base packages")
-    RUN(app, "$(pkg_mgr(app)) update -y", "$(pkg_mgr(app)) upgrade -y")
+    RUN(app, "$(pkg_mgr(app)) update -y")
+    RUN(app, "$(pkg_mgr(app)) upgrade -y")
     RUN(app, "$(pkg_mgr(app)) install -y " * Base.join(map(p -> p.name, collect(base_pkg)), ' '))
 
     # Run packages's image step callback
@@ -406,32 +409,13 @@ end
 
 # ----- Step 3: container setup ---
 function setup_container(app::App, user_run_args::String)
+    base_pkg, pkg_queue = packages_queue(app)
     # Delete previous container if it exists
     destroy_container(app)
 
     # Start container 
     container_command = "$(image_name(app)) $(app.docker_run)"
     Docker.run(
-        app.hostshell,
-        # Mounts
-        Base.join(map(m -> Docker.mountstr(app.hostshell, m), app.mounts), ' '),
-        # Ports
-        Base.join(map(p -> Docker.portstr(app.hostshell, p), app.ports), ' '),
-        # Networks
-        Base.join(map(n -> Docker.networkstr(app.hostshell, n), app.networks), ' '),
-        # User arguments
-        user_run_args;
-        # Container name and bash process to launch in the container
-        argument = container_command,
-        # Name of the container to be launched
-        name = container_name(app),
-        hostname = app.appname,
-        user = user(app),
-        tty = true,
-        detach = true
-    )
-
-    cmd = Docker.run_str(
         app.hostshell,
         # Mounts
         Base.join(map(m -> Docker.mountstr(app.hostshell, m), app.mounts), ' '),
@@ -459,7 +443,7 @@ function setup_container(app::App, user_run_args::String)
         if !isnothing(p.install_container)
             p.install_container(app)
         end
-    end, vcat(packages_queue(app)...))
+    end, pkg_queue)
     println("Container for app $(app.appname) is ready, you can enter the container with command `$(container_shell_cmd(app, true))`")
 end
 
@@ -478,17 +462,16 @@ function deploy!(
     docker_run_args::String = ""
 )
     try
-        #init!(app)
         setup_host(app)
         setup_image(app, regenerate_image)
         setup_container(app, docker_run_args)
     catch e
         # If anything goes wrong, remove everything related to the app
-        clean_all!(app)
+        #clean_all!(app)
         rethrow(e)
     finally
         # Destroy temporary workspace now that everything is setup
-        clean_workspace(app)
+        #clean_workspace(app)
     end
     
 end
@@ -515,32 +498,14 @@ function DevApp(
     # (bash -l -> --login so that bash loads .bash_profile)
     app = App(s, name=name, user=user, from=from, workspace=workspace, docker_run="bash -l")
     # Setup user as root user in the Linux container, and creates its home
-    # Also setup user profile file$
-    
-    #COMMENT(app, "Setting up global env vars")
-    #ENV(app, "USER", ContainedEnv.user(app))
-    #ENV(app, "HOME", raw"/home/${USER}")
-    #COMMENT(app, "Updating package manager")
-    #RUN(app, "$(pkg_mgr(app)) update -y", "$(pkg_mgr(app)) upgrade -y")
-    #RUN(app, "$(pkg_mgr(app)) install -y sudo")
-    #COMMENT(app, "Setting up $(ContainedEnv.user(app)) as a sudo user and create its home")
-    #RUN(
-    #    app,
-    #    "useradd -r -m -U -G sudo -d $(home(app)) -s /bin/bash -c \"Docker SGE user\" $(ContainedEnv.user(app))",
-    #    "echo \"$(ContainedEnv.user(app)) ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee /etc/sudoers.d/$(ContainedEnv.user(app))",
-    #    "chown -R $(ContainedEnv.user(app)) $(home(app))",
-    #    "mkdir $(projects(app))",
-    #    "chown -R $(ContainedEnv.user(app)) $(home(app))/*"
-    #)
-
     user_env = Package(
-        "user_env", from,
+        "user_env", from;
         install_image = app -> begin
             COMMENT(app, "Setting up global env vars")
             ENV(app, "USER", ContainedEnv.user(app))
             ENV(app, "HOME", raw"/home/${USER}")
-            RUN(app, "$(pkg_mgr(app)) update -y", "$(pkg_mgr(app)) upgrade -y")
-            RUN(app, "$(pkg_mgr(app)) install -y sudo")
+            #RUN(app, "$(pkg_mgr(app)) update -y", "$(pkg_mgr(app)) upgrade -y")
+            #RUN(app, "$(pkg_mgr(app)) install -y sudo")
             COMMENT(app, "Setting up $(ContainedEnv.user(app)) as a sudo user and create its home")
             RUN(
                 app,
@@ -551,20 +516,21 @@ function DevApp(
                 "chown -R $(ContainedEnv.user(app)) $(home(app))/*"
             )
         end,
-        requires = []#BasePackage("sudo")]
+        requires = [BasePackage("sudo")]
     )
 
     # Copy bash_profile (store in CommandLine module) to the container
     # Also format it to unix format
     bash_profile = Package(
-        "bash_profile", from,
+        "bash_profile", from;
         install_image = app -> begin
             COPY(app, Base.joinpath(@__DIR__, "bash_profile"), CLI.joinpath(home(app), ".bash_profile"))
             RUN(app, "dos2unix $(home(app))/.bash_profile")
         end,
-        requires = [BasePackage("dos2unix"), user_env]
+        requires = [BasePackage("dos2unix")]
     )
-
+    
+    add_pkg!(app, user_env)
     add_pkg!(app, bash_profile)
     return app
 end
