@@ -20,7 +20,7 @@ macro __define_pathtype(PathType)
             $PathType(segments::Vector{String}) = new(copy(segments))
             $PathType(p::AbstractPath) = new(p.segments)
             # Parse all substrings as path and concatenate
-            $PathType(segments::AbstractString...) = new(vcat(map(s -> Path(s).segments, collect(segments))...))
+            $PathType(segments::AbstractString...) = new(vcat(map(s -> __smartparse(s).segments, collect(segments))...))
         end
     end |> esc
 end
@@ -48,11 +48,12 @@ Base.:(*)(x::AbstractPath, y::AbstractPath) = joinpath(x, y)
 
 # Load path with correct type depending on path formatting
 # TODO: optimize ?
-function Path(x::AbstractString)::AbstractPath
+function __smartparse(x::AbstractString)::AbstractPath
     pp = PosixPath(x)
     wp = WindowsPath(x)
     return length(pp.segments) >= length(wp.segments) ? pp : wp
 end
+Path(x::AbstractString) = __smartparse(x)
 
 
 """
@@ -75,21 +76,23 @@ macro path(args...)
     pathtype()(args...)
 end
 
+# (strargs MUST be a raw string (no escape char))
+# For example you could write wp"A\B\C" but the equivalent is WindowsPath(raw"A\B\C") or WindowsPath("A\\B\\C")
 macro p_str(strargs)
     # Read String as PosixPath
-    pathtype()(Path(strargs))
+    pathtype()(__smartparse(strargs))
 end
 
-# Posix Path macro
+# Posix Path macro (strargs MUST be a raw string (no escape char))
 macro pp_str(strargs)
     # Read String as PosixPath
-    PosixPath(Path(strargs))
+    PosixPath(__smartparse(strargs))
 end
 
-# Windows Path macro
+# Windows Path macro (strargs MUST be a raw string (no escape char))
 macro wp_str(strargs)
     # Read String as PosixPath
-    WindowsPath(Path(strargs))
+    WindowsPath(__smartparse(strargs))
 end
 
 export  AbstractPath, PosixPath, WindowsPath, Path,

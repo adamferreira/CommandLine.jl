@@ -9,6 +9,7 @@
     @test PosixPath("A/B/C/D") == PosixPath("A", "B", "C", "D")
     @test PosixPath("A", "B", "C", "D") == PosixPath("A", "B", "C", "D")
     @test PosixPath("A/B", "C/D") == PosixPath("A", "B", "C", "D")
+    @test PosixPath("/A/B", "C/D") == PosixPath("/A", "B", "C", "D")
 end
 
 @testset "Test stringify" begin
@@ -16,7 +17,7 @@ end
     wp = WindowsPath(["A", "B"])
 
     @test Base.convert(String, pp) == "A/B"
-    @test Base.convert(String, wp) == "A\\B"
+    @test Base.convert(String, wp) == raw"A\B"
     @test "$(pp)" == Base.convert(String, pp)
     @test "$(wp)" == Base.convert(String, wp)
 end
@@ -62,12 +63,9 @@ end
     @test segments(@path "A" "B" "C") == ["A", "B", "C"]
     @test pp"A/B/C" == PosixPath("A", "B", "C")
     @test wp"A/B/C" == WindowsPath("A", "B", "C")
-    @test pp"A\\B\\C" == PosixPath("A", "B", "C")
-    @test wp"A\\B\\C" == WindowsPath("A", "B", "C")
+    @test pp"A\B\C" == PosixPath("A", "B", "C")
+    @test wp"A\B\C" == WindowsPath(raw"A\B\C") == WindowsPath("A\\B\\C") == WindowsPath("A", "B", "C")
 
     @test segments(p"A/B/C") == ["A", "B", "C"]
-    @test segments(wp"A/B/C") == ["A", "B", "C"]
-    @test segments(wp"A\\B\\C") == ["A", "B", "C"]
-    @test segments(pp"A/B/C") == ["A", "B", "C"]
-    @test segments(pp"A\\B\\C") == ["A", "B", "C"]
+    @test segments(p"A\B\C") == ["A", "B", "C"]
 end
