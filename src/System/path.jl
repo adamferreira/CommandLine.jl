@@ -1,14 +1,9 @@
-"""
-@enum PathType begin
-    posix_path = 1
-    windows_path
-end
-"""
+module Paths
 
 abstract type AbstractPath end
 segments(path::AbstractPath) = path.segments
 
-# Utilitaries on AbstractPaths
+# Utilitaries on AbstractPaths (works also for interportaltion)
 Base.show(io::IO, x::AbstractPath) = Base.show(io, Base.string(x))
 
 # Comparison Utilitaries
@@ -20,10 +15,12 @@ macro __define_pathtype(PathType)
     return quote
         struct $PathType <: AbstractPath
             segments::Vector{String}
-            $PathType(segments::Vector{String}) = new(segments)
-            $PathType(segments::AbstractString...) = new([segments...])
             # TODO: Raise Exception when split is unsuccessfull ?
             $PathType(path::AbstractString) = new(Base.split(path, __split_char($PathType)))
+            $PathType(segments::Vector{String}) = new(copy(segments))
+            $PathType(p::AbstractPath) = new(p.segments)
+            # Parse all substrings as path and concatenate
+            $PathType(segments::AbstractString...) = new(vcat(map(s -> Path(s).segments, collect(segments))...))
         end
     end |> esc
 end
@@ -42,8 +39,20 @@ Base.convert(t::Type{WindowsPath}, x::AbstractPath) = t(segments(x))
 # TODO: Specialize Base.joinpath ?
 joinpath(x::AbstractString...) = pathtype()(x...)
 joinpath(x::AbstractPath, y::AbstractString...) = typeof(x)(Base.vcat(segments(x), y...))
-joinpath(x::AbstractPath, y::Vector{AbstractString}) = typeof(x)(Base.vcat(segments(x), y))
+joinpath(x::AbstractPath, y::Vector{String}) = typeof(x)(Base.vcat(segments(x), y))
 joinpath(x::AbstractPath, y::AbstractPath) = typeof(x)(Base.vcat(segments(x), segments(y)))
+
+# Concatenation operator
+Base.:(*)(x::AbstractPath, y::AbstractString) = joinpath(x, y)
+Base.:(*)(x::AbstractPath, y::AbstractPath) = joinpath(x, y)
+
+# Load path with correct type depending on path formatting
+# TODO: optimize ?
+function Path(x::AbstractString)::AbstractPath
+    pp = PosixPath(x)
+    wp = WindowsPath(x)
+    return length(pp.segments) >= length(wp.segments) ? pp : wp
+end
 
 
 """
@@ -68,5 +77,21 @@ end
 
 macro p_str(strargs)
     # Read String as PosixPath
-    pathtype()(PosixPath(strargs))
+    pathtype()(Path(strargs))
+end
+
+# Posix Path macro
+macro pp_str(strargs)
+    # Read String as PosixPath
+    PosixPath(Path(strargs))
+end
+
+# Windows Path macro
+macro wp_str(strargs)
+    # Read String as PosixPath
+    WindowsPath(Path(strargs))
+end
+
+export  AbstractPath, PosixPath, WindowsPath, Path,
+        joinpath, pathtype, segments, @path, @p_str, @pp_str, @wp_str
 end

@@ -1,4 +1,5 @@
 module ContainedEnv
+using CommandLine.Paths
 import CommandLine as CLI
 import CommandLine.Docker as Docker
 
@@ -57,7 +58,7 @@ mutable struct App
     # Base image name form wich creating ContainedEnv image
     baseimg::String
     # Home directory for this app
-    home::CLI.AbstractPath
+    home::AbstractPath
     # Command to be launched on the container as part of `Docker run` command
     docker_run::String
     # Shell on host (Shell on which docker commands will be launched)
@@ -94,10 +95,10 @@ mutable struct App
 
         # Guess pathtype from image name
         # TODO: Get pathtype from Shell `s` ?
-        ptype = occursin("Windows", from) ? CLI.WindowsPath : CLI.PosixPath
+        ptype = occursin("Windows", from) ? WindowsPath : PosixPath
         # Set home depending on the OS
         #TODO: support MacOS
-        home =  ptype == CLI.PosixPath ? CLI.PosixPath("/home/$(user)") : CLI.WindowsPath("C:", "Users", user)
+        home =  ptype == PosixPath ? PosixPath("/home/$(user)") : WindowsPath("C:", "Users", user)
     
         app = new(name, user, from, home, docker_run, s, nothing, ["FROM $from"], [], workspace, [], [], [])
         # If the app points to an already running container, we can already open a shell into it
@@ -183,10 +184,10 @@ image_name(app::App) = "$(app.appname)_img"
 # ---------------------------
 # Utilitaries
 # ---------------------------
-pathtype(app::App)::Type{CLI.AbstractPath} = type(app.home)
-home(app::App)::CLI.AbstractPath = app.home
+pathtype(app::App)::Type{AbstractPath} = type(app.home)
+home(app::App)::AbstractPath = app.home
 user(app::App)::String = app.user
-projects(app::App)::CLI.AbstractPath = CLI.joinpath(home(app), "projects")
+projects(app::App)::AbstractPath = CLI.joinpath(home(app), "projects")
 
 # ---------------------------
 # Container related
@@ -467,11 +468,11 @@ function deploy!(
         setup_container(app, docker_run_args)
     catch e
         # If anything goes wrong, remove everything related to the app
-        #clean_all!(app)
+        clean_all!(app)
         rethrow(e)
     finally
         # Destroy temporary workspace now that everything is setup
-        #clean_workspace(app)
+        clean_workspace(app)
     end
     
 end

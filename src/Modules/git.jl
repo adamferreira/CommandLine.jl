@@ -47,6 +47,7 @@ end
 """
 
 module Git
+using CommandLine.Paths
 import CommandLine as CLI
 
 """

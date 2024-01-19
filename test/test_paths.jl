@@ -7,6 +7,8 @@
     @test segments(pp) == segments(wp)
     @test PosixPath(["A", "B"]) == PosixPath("A", "B")
     @test PosixPath("A/B/C/D") == PosixPath("A", "B", "C", "D")
+    @test PosixPath("A", "B", "C", "D") == PosixPath("A", "B", "C", "D")
+    @test PosixPath("A/B", "C/D") == PosixPath("A", "B", "C", "D")
 end
 
 @testset "Test stringify" begin
@@ -22,14 +24,16 @@ end
 @testset "Test join" begin
     pp = PosixPath(["A", "B"])
     wp = WindowsPath(["A", "B"])
-    j1 = CommandLine.joinpath(pp, ["C", "D"])
-    j2 = CommandLine.joinpath(wp, "C", "D")
-    j3 = CommandLine.joinpath(wp, pp)
+    j1 = Paths.joinpath(pp, ["C", "D"])
+    j2 = Paths.joinpath(wp, "C", "D")
+    j3 = Paths.joinpath(wp, pp)
 
     @test segments(j1) == ["A", "B", "C", "D"]
     @test segments(j2) == ["A", "B", "C", "D"]
     @test segments(j3) == ["A", "B", "A", "B"]
-    @test segments(CommandLine.joinpath("A", "B", "C", "D")) == ["A", "B", "C", "D"]
+    @test segments(Paths.joinpath("A", "B", "C", "D")) == ["A", "B", "C", "D"]
+    @test segments(j1 * "E" * "F") == ["A", "B", "C", "D", "E", "F"]
+    @test segments(j1 * PosixPath("E", "F")) == ["A", "B", "C", "D", "E", "F"]
 end
 
 @testset "Test Equals" begin
@@ -37,6 +41,7 @@ end
     @test PosixPath(["A", "B"]) == PosixPath(["A", "B"])
     @test PosixPath(["A", "B"]) != PosixPath(["A", "C"])
     @test PosixPath(["A", "B", "C", "D"]) == "A/B/C/D"
+    @test PosixPath(["A", "B/B", "C", "D/E"]) == "A/B/B/C/D/E"
 end
 
 @testset "Test Convert" begin
@@ -55,5 +60,14 @@ end
 
 @testset "Test path macro" begin
     @test segments(@path "A" "B" "C") == ["A", "B", "C"]
+    @test pp"A/B/C" == PosixPath("A", "B", "C")
+    @test wp"A/B/C" == WindowsPath("A", "B", "C")
+    @test pp"A\\B\\C" == PosixPath("A", "B", "C")
+    @test wp"A\\B\\C" == WindowsPath("A", "B", "C")
+
     @test segments(p"A/B/C") == ["A", "B", "C"]
+    @test segments(wp"A/B/C") == ["A", "B", "C"]
+    @test segments(wp"A\\B\\C") == ["A", "B", "C"]
+    @test segments(pp"A/B/C") == ["A", "B", "C"]
+    @test segments(pp"A\\B\\C") == ["A", "B", "C"]
 end

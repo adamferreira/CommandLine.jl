@@ -1,5 +1,6 @@
 module Docker
 using JSON
+using CommandLine.Paths
 import CommandLine as CLI
 """
 One must define the environment variable `CL_DOCKER` in a `Shell`
@@ -278,8 +279,8 @@ export client_version
 """
 struct Mount
     type::Symbol 
-    src::String
-    target::String
+    src::AbstractPath
+    target::PosixPath
     readonly::Bool
     driver::String
     opt::Vector{String}
@@ -296,14 +297,12 @@ struct Mount
 end
 
 function mountstr(s::CLI.Shell, m::Mount)::String
-    # Docker only support posix path as src (host) paths
-    src = CLI.cygpath(s, m.src, "-u")
-    target = CLI.cygpath(s, m.target, "-u")
     # The syntax --mount src=<src>,target=<target>[,volume-driver=<driver>][,readonly][,volume-opt=<opt_i>]*
     #   Only works when <src> is a volume, thus we prefer the short format
     #   -v <src>:<target>[,ro]
     #   When <src> is a (host) path
-    short = (m.type == :hostpath)# || (CLI.isdir(s, src) || CLI.isfile(s, src))
+    # Docker requires <target> to be a posix path
+    short = (m.type == :hostpath)
 
     if short
         line = "-v $(src):$(target)" * (m.readonly ? ",ro" : "")
