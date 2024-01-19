@@ -50,22 +50,22 @@ end
 
     # -------- Mounts --------
     # Short syntax
-    m = Docker.Mount(:hostpath, "path/on/host", "path/in/container")
+    m = Docker.Mount(:hostpath, pp"path/on/host", pp"path/in/container")
     compare_string(Docker.mountstr(s, m), "-v path/on/host:path/in/container")
-    m = Docker.Mount(:hostpath, "path/on/host", "path/in/container"; readonly = true)
+    m = Docker.Mount(:hostpath, pp"path/on/host", pp"path/in/container"; readonly = true)
     compare_string(Docker.mountstr(s, m), "-v path/on/host:path/in/container,ro")
     # Long syntax
-    m = Docker.Mount(:volume, "myvolume", "path/in/container")
+    m = Docker.Mount(:volume, p"myvolume", pp"path/in/container")
     compare_string(Docker.mountstr(s, m), "--mount src=myvolume,target=path/in/container,volume-driver=local")
-    m = Docker.Mount(:volume, "myvolume", "path/in/container"; readonly = true)
+    m = Docker.Mount(:volume, p"myvolume", pp"path/in/container"; readonly = true)
     compare_string(Docker.mountstr(s, m), "--mount src=myvolume,target=path/in/container,volume-driver=local,readonly")
-    m = Docker.Mount(:volume, "myvolume", "path/in/container"; readonly = true, opt = ["opt1", "opt2"])
+    m = Docker.Mount(:volume, p"myvolume", pp"path/in/container"; readonly = true, opt = ["opt1", "opt2"])
     compare_string(Docker.mountstr(s, m), "--mount src=myvolume,target=path/in/container,volume-driver=local,readonly,volume-opt=opt1,volume-opt=opt2")
     # Non posix paths
-    m = Docker.Mount(:hostpath, "path\\on\\host", "path/in/container")
-    compare_string(Docker.mountstr(s, m), "-v path/on/host:path/in/container")
-    m = Docker.Mount(:hostpath, "path\\on\\host", "path\\in\\container")
-    compare_string(Docker.mountstr(s, m), "-v path/on/host:path/in/container")
+    m = Docker.Mount(:hostpath, p"path\on\host", pp"path/in/container")
+    compare_string(Docker.mountstr(s, m), raw"-v path\on\host:path/in/container")
+    m = Docker.Mount(:hostpath, p"path\on\host", p"path\in\container")
+    compare_string(Docker.mountstr(s, m), raw"-v path\on\host:path/in/container")
 end
 
 @testset "Test Git Command Generation" begin

@@ -301,13 +301,15 @@ function mountstr(s::CLI.Shell, m::Mount)::String
     #   Only works when <src> is a volume, thus we prefer the short format
     #   -v <src>:<target>[,ro]
     #   When <src> is a (host) path
-    # Docker requires <target> to be a posix path
     short = (m.type == :hostpath)
+    # Docker requires <target> to be a posix path
+    src = m.src
+    target = PosixPath(m.target)
 
     if short
         line = "-v $(src):$(target)" * (m.readonly ? ",ro" : "")
     else
-        line = "--mount src=$src,target=$target,volume-driver=$(m.driver)"
+        line = "--mount src=$(src),target=$(target),volume-driver=$(m.driver)"
         if m.readonly
             line = line * ",readonly"
         end

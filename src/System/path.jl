@@ -4,7 +4,7 @@ abstract type AbstractPath end
 segments(path::AbstractPath) = path.segments
 
 # Utilitaries on AbstractPaths (works also for interportaltion)
-Base.show(io::IO, x::AbstractPath) = Base.show(io, Base.string(x))
+Base.show(io::IO, x::AbstractPath) = print(io, Base.string(x))
 
 # Comparison Utilitaries
 Base.:(==)(x::AbstractPath, y::AbstractPath) = (typeof(x)==typeof(y)) && (segments(x)==segments(y))
