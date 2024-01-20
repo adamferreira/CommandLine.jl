@@ -167,18 +167,27 @@ SUB_COMMANDS = [
 
 # Define SubCommands calls as fonction of the module
 for fct in SUB_COMMANDS
-    @eval function $(Symbol(fct, :_str))(s::CLI.Shell, args...; kwargs...)
+    #@eval function $(Symbol(fct, :_str))(s::CLI.Shell, args...; kwargs...)
+    #    strfct = string($fct)
+    #    return "$(s[:CL_DOCKER]) $strfct $(CLI.make_cmd(args...; kwargs...))"
+    #end
+
+    #@eval function $fct(s::CLI.Shell, args...; kwargs...)
+    #    return CLI.run(s, $(Symbol(fct, :_str))(s, args...; kwargs...))
+    #end
+
+    @eval function $fct(args...; kwargs...)
         strfct = string($fct)
-        return "$(s[:CL_DOCKER]) $strfct $(CLI.make_cmd(args...; kwargs...))"
+        return "docker $strfct $(CLI.make_cmd(args...; kwargs...))"
     end
 
     @eval function $fct(s::CLI.Shell, args...; kwargs...)
-        #println("You are running docker command ", $(Symbol(fct, :_str))(s, args...; kwargs...))
-        return CLI.run(s, $(Symbol(fct, :_str))(s, args...; kwargs...))
+        strfct = string($fct)
+        return CLI.run(s, "$(s[:CL_DOCKER]) $strfct $(CLI.make_cmd(args...; kwargs...))")
     end
 
     # Also export the function
-    @eval export $(fct), $(Symbol(fct, :_str))
+    @eval export $(fct)#, $(Symbol(fct, :_str))
 end
 
 """
@@ -186,18 +195,7 @@ end
 filter="name=cntname"
 """
 function containers(s::CLI.Shell, filter::String)::Vector{Dict}
-    lock(s.run_mutex)
-    # Silent calls for now and get output (save current handler)
-    savefct = s.handler
-    s.handler = CLI.checkoutput
-
-    # Scrap outputs of `docker container ls`
-    out = container(s, "ls", "--all"; format="'{{json .}}'", filter=filter)
-
-    # Reset Shell to original state
-    s.handler = savefct
-    unlock(s.run_mutex)
-
+    out = CLI.checkoutput(s, container("ls", "--all"; format="'{{json .}}'", filter=filter))
     return JSON.parse.(out)
 end
 export containers
@@ -214,49 +212,24 @@ end
 export container_running
 
 function networks(s::CLI.Shell)::Vector{Dict}
-    # Silent calls for now and get output (save current handler)
-    savefct = s.handler
-    s.handler = CLI.checkoutput
-    out = network(s, "ls"; format="'{{json .}}'")
-    # Reset Shell to original state
-    s.handler = savefct
-    #TODO: encapsulate handler switch in a method call 'with handler?'
+    out = CLI.checkoutput(s, network("ls"; format="'{{json .}}'"))
     return JSON.parse.(out)
 end
 
 function get_image(s::CLI.Shell, imgname::String)::Union{Nothing, Dict}
-    lock(s.run_mutex)
-    # Silent calls for now and get output (save current handler)
-    savefct = s.handler
-    s.handler = CLI.checkoutput
-
     # Scrap outputs of `docker image ls`
-    out = images(s, imgname; format="'{{json .}}'")
+    out = CLI.checkoutput(s, images(imgname; format="'{{json .}}'"))
 
     if length(out) == 0
         return nothing
     end
-
-    # Reset Shell to original state
-    s.handler = savefct
-    unlock(s.run_mutex)
 
     return JSON.parse(out[1])
 end
 export get_image
 
 function json_version(s::CLI.Shell)::Dict
-    lock(s.run_mutex)
-    # Silent calls for now and get output (save current handler)
-    savefct = s.handler
-    s.handler = CLI.checkoutput
-
-    vstr = version(s; format="'{{json .}}'")
-
-    # Reset Shell to original state
-    s.handler = savefct
-    unlock(s.run_mutex)
-
+    vstr = CLI.checkoutput(s, version(format="'{{json .}}'"))
     return JSON.parse(vstr[1])
 end
 
@@ -278,8 +251,9 @@ export client_version
 - `opt::Vector{String}` Mount options (see Docker's --mount)
 """
 struct Mount
-    type::Symbol 
-    src::AbstractPath
+    type::Symbol
+    src::PosixPath
+    # Docker requires <target> to be a posix path
     target::PosixPath
     readonly::Bool
     driver::String
@@ -292,24 +266,29 @@ struct Mount
         driver = "local",
         opt = []
     )
-        return new(type, src, target, readonly, driver, opt)
+        return new(
+            type,
+            PosixPath(typeof(src) == String ? Path(src) : src),
+            PosixPath(typeof(target) == String ? Path(target) : target),
+            readonly,
+            driver,
+            opt
+        )
     end
 end
 
-function mountstr(s::CLI.Shell, m::Mount)::String
+function Base.string(m::Mount)::String
     # The syntax --mount src=<src>,target=<target>[,volume-driver=<driver>][,readonly][,volume-opt=<opt_i>]*
     #   Only works when <src> is a volume, thus we prefer the short format
     #   -v <src>:<target>[,ro]
     #   When <src> is a (host) path
-    short = (m.type == :hostpath)
     # Docker requires <target> to be a posix path
-    src = m.src
-    target = PosixPath(m.target)
+    short = (m.type == :hostpath)
 
     if short
-        line = "-v $(src):$(target)" * (m.readonly ? ",ro" : "")
+        line = "-v $(m.src):$(m.target)" * (m.readonly ? ",ro" : "")
     else
-        line = "--mount src=$(src),target=$(target),volume-driver=$(m.driver)"
+        line = "--mount src=$(m.src),target=$(m.target),volume-driver=$(m.driver)"
         if m.readonly
             line = line * ",readonly"
         end
@@ -319,7 +298,9 @@ function mountstr(s::CLI.Shell, m::Mount)::String
     end
     return line
 end
-export Mount, mountstr
+# Interpolation overloading
+Base.show(io::IO, m::Mount) = print(io, Base.string(m))
+export Mount
 
 
 struct Port
@@ -330,10 +311,12 @@ struct Port
     end
 end
 
-function portstr(s::CLI.Shell, m::Port)::String
-    return "-p $(m.on_host):$(m.on_container)"
+function Base.string(p::Port)::String
+    return "-p $(p.on_host):$(p.on_container)"
 end
-export Port, portstr
+# Interpolation overloading
+Base.show(io::IO, p::Port) = print(io, Base.string(p))
+export Port
 
 
 struct Network
@@ -342,10 +325,12 @@ struct Network
         return new(name)
     end
 end
-function networkstr(s::CLI.Shell, n::Network)::String
+function Base.string(n::Network)::String
     return "--net $(n.name)"
 end
-export Network, networkstr
+# Interpolation overloading
+Base.show(io::IO, n::Network) = print(io, Base.string(n))
+export Network
 
 
 # Todo: Docker container run should return a Shell{Bash, Docker}

@@ -132,16 +132,17 @@ SUB_COMMANDS = [
 
 # Define SubCommands calls as fonction of the module
 for fct in SUB_COMMANDS
-    @eval function $(Symbol(fct, :_str))(s::CLI.Shell, args...; kwargs...)
+    @eval function $fct(args...; kwargs...)
         strfct = string($fct)
-        return "$(s[:CL_GIT]) $strfct $(CLI.make_cmd(args...; kwargs...))"
+        return "git $strfct $(CLI.make_cmd(args...; kwargs...))"
     end
 
     @eval function $fct(s::CLI.Shell, args...; kwargs...)
-        return CLI.run(s, $(Symbol(fct, :_str))(s, args...; kwargs...))
+        strfct = string($fct)
+        return CLI.run(s, "$(s[:CL_GIT]) $strfct $(CLI.make_cmd(args...; kwargs...))")
     end
 
     # Also export the function
-    @eval export $(fct), $(Symbol(fct, :_str))
+    @eval export $(fct)
 end
 end

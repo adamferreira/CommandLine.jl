@@ -110,10 +110,6 @@ mutable struct App
                 app.contshell = nothing
             end
         end
-        # Setup workspace directory
-        @assert !CLI.isdir(app.hostshell, app.workspace)
-        CLI.mkdir(app.hostshell, app.workspace)
-        @assert CLI.isdir(app.hostshell, app.workspace)
 
         return app
     end
@@ -187,21 +183,21 @@ image_name(app::App) = "$(app.appname)_img"
 pathtype(app::App)::Type{AbstractPath} = type(app.home)
 home(app::App)::AbstractPath = app.home
 user(app::App)::String = app.user
-projects(app::App)::AbstractPath = CLI.joinpath(home(app), "projects")
+projects(app::App)::AbstractPath = Paths.joinpath(home(app), "projects")
 
 # ---------------------------
 # Container related
 # ---------------------------
 function container_shell_cmd(app::App, usershell::Bool = true)::String
     if usershell
-        cmd = Docker.exec_str(app.hostshell;
+        cmd = Docker.exec(
             argument = "$(container_name(app)) $(app.docker_run)",
             user = user(app),
             tty = true,
             interactive = true
         )
     else
-        cmd = Docker.exec_str(app.hostshell;
+        cmd = Docker.exec(
             argument = "$(container_name(app)) $(app.docker_run)",
             user = user(app),
             tty = false,
@@ -241,9 +237,9 @@ function destroy_container(app::App)
     Docker.rm(app.hostshell; force=true, argument=container_name(app))
 end
 
-function next_container_name(app::App)
-    return "$(app.appname)_ctn_$(length(app.containers))"
-end
+#function next_container_name(app::App)
+#    return "$(app.appname)_ctn_$(length(app.containers))"
+#end
 function container_running(cont::Container)::Bool
     return Docker.container_running(app.hostshell, container_name(app, cont))
 end
@@ -272,6 +268,14 @@ end
 
 function ENV(app::App, var, val)
     push!(app.dockerfile_record, "ENV $var $val")
+end
+
+function LABEL(app::App, var, val)
+    push!(app.dockerfile_record, "LABEL $var=$val")
+end
+
+function ARG(app::App, var, val)
+    push!(app.dockerfile_record, "ARG $var=$val")
 end
 
 function COPY(app::App, from, to)
@@ -419,11 +423,11 @@ function setup_container(app::App, user_run_args::String)
     Docker.run(
         app.hostshell,
         # Mounts
-        Base.join(map(m -> Docker.mountstr(app.hostshell, m), app.mounts), ' '),
+        Base.join(map(m -> Base.string(m), app.mounts), ' '),
         # Ports
-        Base.join(map(p -> Docker.portstr(app.hostshell, p), app.ports), ' '),
+        Base.join(map(p -> Base.string(p), app.ports), ' '),
         # Networks
-        Base.join(map(n -> Docker.networkstr(app.hostshell, n), app.networks), ' '),
+        Base.join(map(n -> Base.string(n), app.networks), ' '),
         # User arguments
         user_run_args;
         # Container name and bash process to launch in the container
@@ -463,6 +467,11 @@ function deploy!(
     docker_run_args::String = ""
 )
     try
+        # Setup workspace directory
+        @assert !CLI.isdir(app.hostshell, app.workspace)
+        CLI.mkdir(app.hostshell, app.workspace)
+        @assert CLI.isdir(app.hostshell, app.workspace)
+
         setup_host(app)
         setup_image(app, regenerate_image)
         setup_container(app, docker_run_args)
@@ -525,7 +534,7 @@ function DevApp(
     bash_profile = Package(
         "bash_profile", from;
         install_image = app -> begin
-            COPY(app, Base.joinpath(@__DIR__, "bash_profile"), CLI.joinpath(home(app), ".bash_profile"))
+            COPY(app, Base.joinpath(@__DIR__, "bash_profile"), Paths.joinpath(home(app), ".bash_profile"))
             RUN(app, "dos2unix $(home(app))/.bash_profile")
         end,
         requires = [BasePackage("dos2unix")]
