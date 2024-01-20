@@ -219,20 +219,23 @@ function new_container_shell(app::App)::CLI.Shell
 end
 
 function destroy_container(app::App)
-    containers = Docker.containers(app.hostshell, "name=$(container_name(app))")
+    container = Docker.get_container(app.hostshell, container_name(app))
     # Container already removed, or never created
-    if length(containers) == 0
+    if isnothing(container)
         return nothing
     end
-    container = containers[1]
-    # Stop the container
+
+    # Stop the container if it is running
     if container["State"] == "running"
         Docker.stop(app.hostshell, container_name(app))
     end
 
     # Check that the container still exists, but is not running
-    container = Docker.containers(app.hostshell, "name=$(container_name(app))")[1]
-    container["State"] == "exited" || @error("Could not stop container $(container_name(app))")
+    container = Docker.get_container(app.hostshell, container_name(app))
+    if !isnothing(container)
+        container["State"] == "exited" || @error("Could not stop container $(container_name(app))")
+    end
+
     # Destroy the container
     Docker.rm(app.hostshell; force=true, argument=container_name(app))
 end
@@ -240,13 +243,13 @@ end
 #function next_container_name(app::App)
 #    return "$(app.appname)_ctn_$(length(app.containers))"
 #end
-function container_running(cont::Container)::Bool
-    return Docker.container_running(app.hostshell, container_name(app, cont))
-end
-function create_container(app::App)::Container
-end
-function start_new_container!(app::App)
-end
+#function container_running(cont::Container)::Bool
+#    return Docker.container_running(app.hostshell, container_name(app, cont))
+#end
+#function create_container(app::App)::Container
+#end
+#function start_new_container!(app::App)
+#end
 
 
 # ---------------------------

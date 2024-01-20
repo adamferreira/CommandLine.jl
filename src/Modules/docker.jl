@@ -190,43 +190,61 @@ for fct in SUB_COMMANDS
     @eval export $(fct)#, $(Symbol(fct, :_str))
 end
 
-"""
-    containers(s::CLI.Shell, filter::String)::Vector{Dict}
-filter="name=cntname"
-"""
-function containers(s::CLI.Shell, filter::String)::Vector{Dict}
-    out = CLI.checkoutput(s, container("ls", "--all"; format="'{{json .}}'", filter=filter))
-    return JSON.parse.(out)
-end
-export containers
 
-function container_exists(s::CLI.Shell, cname::String)
-    return length(containers(s, "name=$(cname)")) > 1
+for fct in [:container, :image, :volume, :network]
+    # Generalisation for 'ls' subfunctions with parametric filters, example:
+    # function containers(s::CLI.Shell, filters::Pair{String, String}...)::Vector{Dict}
+    #     out = CLI.checkoutput(s,
+    #         container(
+    #             "ls", "--all", map(f -> "--filter $(f.first)=$(f.second)", filters)...,
+    #             ; format="'{{json .}}'"
+    #         )
+    #     )
+    #     return JSON.parse.(out)
+    # end
+    #
+    # function get_container(s::CLI.Shell, name::String)::Union{Nothing, Dict}
+    #     elements = containers(s, "name" => name)
+    #     return length(elements) == 0 ? nothing : elements[1]
+    # end
+    #
+    # function container_exist(s::CLI.Shell, name::String)::Bool
+    #     return !isnothing(get_container(s, name))
+    # end
+    #
+    # export containers, get_container, container_exist
+    # $(Symbol(fct, :s) creates the Symbol <fct>s
+    # For example, :volume will become :volumes
+    @eval function $(Symbol(fct, :s))(s::CLI.Shell, filters::Pair{String, String}...)::Vector{Dict}
+        out = CLI.checkoutput(s,
+            $(fct)(
+                "ls", map(f -> "--filter $(f.first)=$(f.second)", filters)...,
+                ; format="'{{json .}}'"
+            )
+        )
+        return JSON.parse.(out)
+    end
+
+    @eval function $(Symbol(:get_, fct))(s::CLI.Shell, name::String)::Union{Nothing, Dict}
+        # For some reasons, docker image ls --filter name=name does not work
+        # and require --filter reference=name instead
+        filter = Symbol($fct) == :image ? "reference" : "name"
+        elements = $(Symbol(fct, :s))(s, filter => name)
+        return length(elements) == 0 ? nothing : elements[1]
+    end
+
+    @eval function $(Symbol(fct, :_exist))(s::CLI.Shell, name::String)::Bool
+        return !isnothing( $(Symbol(:get_, fct))(s, name) )
+    end
+
+    @eval export $(Symbol(fct, :s)), $(Symbol(:get_, fct)), $(Symbol(fct, :_exist))
 end
-export container_exists
 
 function container_running(s::CLI.Shell, cname::String)::Bool
-    status = Docker.containers(s, "name=$(cname)")
+    status = Docker.containers(s, "name" => cname)
     return length(status) == 0 ? false : status[1]["State"] == "running"
 end
 export container_running
-
-function networks(s::CLI.Shell)::Vector{Dict}
-    out = CLI.checkoutput(s, network("ls"; format="'{{json .}}'"))
-    return JSON.parse.(out)
-end
-
-function get_image(s::CLI.Shell, imgname::String)::Union{Nothing, Dict}
-    # Scrap outputs of `docker image ls`
-    out = CLI.checkoutput(s, images(imgname; format="'{{json .}}'"))
-
-    if length(out) == 0
-        return nothing
-    end
-
-    return JSON.parse(out[1])
-end
-export get_image
 
 function json_version(s::CLI.Shell)::Dict
     vstr = CLI.checkoutput(s, version(format="'{{json .}}'"))
