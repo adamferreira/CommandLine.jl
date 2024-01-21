@@ -315,6 +315,12 @@ function clean_workspace(app::App)
     end
 end
 
+function create_workspace(app::App)
+    @assert !CLI.isdir(app.hostshell, app.workspace)
+    CLI.mkdir(app.hostshell, app.workspace)
+    @assert CLI.isdir(app.hostshell, app.workspace)
+end
+
 # ----- Step 0: local setup (dummy recursive depth-first search) ---
 function packages_queue(app::App)
     pkg_queue = Vector{Package}()
@@ -359,13 +365,10 @@ function setup_image(app::App, regenerate_image::Bool)
     destroy_container(app)
 
     # Delete previous image if it exists
-    if regenerate_image
-        if image_exist(app)
+    if image_exist(app)
+        if regenerate_image
             destroy_image(app)
         end
-    else
-        # Stop, proceed to container building
-        return nothing
     end
 
     # Run base packages installation in one line to save layer count
@@ -423,8 +426,7 @@ function setup_container(app::App, user_run_args::String)
 
     # Start container 
     container_command = "$(image_name(app)) $(app.docker_run)"
-    Docker.run(
-        app.hostshell,
+    Docker.run(app.hostshell,
         # Mounts
         Base.join(map(m -> Base.string(m), app.mounts), ' '),
         # Ports
@@ -466,15 +468,11 @@ end
 """
 function deploy!(
     app::App;
-    regenerate_image::Bool = true,
+    regenerate_image::Bool = false,
     docker_run_args::String = ""
 )
     try
-        # Setup workspace directory
-        @assert !CLI.isdir(app.hostshell, app.workspace)
-        CLI.mkdir(app.hostshell, app.workspace)
-        @assert CLI.isdir(app.hostshell, app.workspace)
-
+        create_workspace(app)
         setup_host(app)
         setup_image(app, regenerate_image)
         setup_container(app, docker_run_args)
@@ -537,8 +535,9 @@ function DevApp(
     bash_profile = Package(
         "bash_profile", from;
         install_image = app -> begin
-            COPY(app, Base.joinpath(@__DIR__, "bash_profile"), Paths.joinpath(home(app), ".bash_profile"))
-            RUN(app, "dos2unix $(home(app))/.bash_profile")
+            img_profile = Paths.joinpath(home(app), ".bash_profile")
+            COPY(app, Base.joinpath(@__DIR__, "bash_profile"), img_profile)
+            RUN(app, "dos2unix $(img_profile)")
         end,
         requires = [BasePackage("dos2unix")]
     )
