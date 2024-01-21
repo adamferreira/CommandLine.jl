@@ -26,8 +26,8 @@ CLI.run(s, "export MSYS_NO_PATHCONV=1")
 
 volumetest = Docker.Mount(:volume, "myvolume", "/opt/mountdir")
 filetest = Paths.joinpath(volumetest.target, "monvolume.txt")
-app_writter = ContainedEnv.DevApp(s; name = "writter", user = "root", from = "ubuntu:22.04")
-app_reader = ContainedEnv.DevApp(s; name = "reader", user = "root", from = "ubuntu:22.04")
+app_writter = ContainedEnv.App(s; name = "writter", user = "root", from = "ubuntu:22.04")
+app_reader = ContainedEnv.App(s; name = "reader", user = "root", from = "ubuntu:22.04")
 
 
 # Docker will automatically creates the volume the first time it is used by a container (in the docker run command)

@@ -85,7 +85,7 @@ mutable struct App
         user = "root",
         from = "ubuntu:22.04",
         workspace = Base.pwd(),
-        docker_run = "bash _l"
+        docker_run = "bash -l"
     )
         !isnothing(s["CL_DOCKER"]) || @error("Cannot find docker installation")
 
@@ -372,10 +372,12 @@ function setup_image(app::App, regenerate_image::Bool)
     end
 
     # Run base packages installation in one line to save layer count
-    COMMENT(app, "Installing base packages")
-    RUN(app, "$(pkg_mgr(app)) update -y")
-    RUN(app, "$(pkg_mgr(app)) upgrade -y")
-    RUN(app, "$(pkg_mgr(app)) install -y " * Base.join(map(p -> p.name, collect(base_pkg)), ' '))
+    if length(base_pkg) > 0 # Do not update repo cache if their is no package to install, because it is quite space heavy
+        COMMENT(app, "Installing base packages")
+        RUN(app, "$(pkg_mgr(app)) update -y")
+        RUN(app, "$(pkg_mgr(app)) upgrade -y")
+        RUN(app, "$(pkg_mgr(app)) install -y " * Base.join(map(p -> p.name, collect(base_pkg)), ' '))
+    end
 
     # Run packages's image step callback
     map(p -> begin
@@ -387,7 +389,7 @@ function setup_image(app::App, regenerate_image::Bool)
     end, pkg_queue)
 
     # Now work on the App's temporary workspace
-    CLI.indir(app.hostshell, app.workspace) do shell
+    CLI.indir(app.hostshell, app.workspace) do shell    
         # Write Dockerfile #TODO do not put -w
         host_workspace = CLI.cygpath(shell, app.workspace, "-w")
         open(Base.joinpath(host_workspace, "Dockerfile"), "w+") do file
@@ -511,7 +513,7 @@ function DevApp(
 )::App
     # (bash -l -> --login so that bash loads .bash_profile)
     app = App(s, name=name, user=user, from=from, workspace=workspace, docker_run="bash -l")
-    # Setup user as root user in the Linux container, and creates its home
+    # Setup custom user as a sudo-user and creates its home directory
     user_env = Package(
         "user_env", from;
         install_image = app -> begin
@@ -545,6 +547,7 @@ function DevApp(
         requires = [BasePackage("dos2unix")]
     )
     # Do not setup user 'root', it exists by default
+    # And do not bother with creating a pretty bash profile
     if user != "root"
         add_pkg!(app, user_env)
     end
