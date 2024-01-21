@@ -82,8 +82,8 @@ mutable struct App
     function App(
         s::CLI.Shell;
         name,
-        user,
-        from,
+        user = "root",
+        from = "ubuntu:22.04",
         workspace = Base.pwd(),
         docker_run = "bash _l"
     )
@@ -394,8 +394,11 @@ function setup_image(app::App, regenerate_image::Bool)
             for line in app.dockerfile_record
                 write(file, line * "\n")
             end
-            write(file, "# Switch to custom user" * '\n')
-            write(file, "USER $(user(app))" * '\n')
+            # Switch to custom user if non-root
+            if user != "root"
+                write(file, "# Switch to custom user" * '\n')
+                write(file, "USER $(user(app))" * '\n')
+            end
         end
 
         # Build image
@@ -502,8 +505,8 @@ export  JuliaLinux
 function DevApp(
     s::CLI.Shell;
     name,
-    user,
-    from,
+    user = "root",
+    from = "ubuntu:22.04",
     workspace = Base.pwd()
 )::App
     # (bash -l -> --login so that bash loads .bash_profile)
@@ -541,8 +544,10 @@ function DevApp(
         end,
         requires = [BasePackage("dos2unix")]
     )
-    
-    add_pkg!(app, user_env)
+    # Do not setup user 'root', it exists by default
+    if user != "root"
+        add_pkg!(app, user_env)
+    end
     add_pkg!(app, bash_profile)
     return app
 end
