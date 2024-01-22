@@ -273,6 +273,10 @@ function ENV(app::App, var, val)
     push!(app.dockerfile_record, "ENV $var $val")
 end
 
+function ADDENV(app::App, var, val)
+    push!(app.dockerfile_record, "ENV $var=\${$var}:$val")
+end
+
 function LABEL(app::App, var, val)
     push!(app.dockerfile_record, "LABEL $var=$val")
 end
