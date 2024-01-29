@@ -144,7 +144,7 @@ function pkg_mgr(app::App)
         return "$prefix apt-get"
     end
 
-    if occursin("fedora", app.baseimg)
+    if occursin("fedora", app.baseimg) || if occursin("redhat", app.baseimg)
         return "$prefix yum"
     end
 
@@ -518,18 +518,18 @@ function DevApp(
     # (bash -l -> --login so that bash loads .bash_profile)
     app = App(s, name=name, user=user, from=from, workspace=workspace, docker_run="bash -l")
     # Setup custom user as a sudo-user and creates its home directory
-    user_env = Package(
-        "user_env", from;
+    sudouser = Package(
+        "sudouser", from;
         install_image = app -> begin
+            # 'sudo' group in Fedora is 'wheel'
+            sudo_group = occursin("fedora", app.baseimg) ? "wheel" : "sudo"
             COMMENT(app, "Setting up global env vars")
             ENV(app, "USER", ContainedEnv.user(app))
             ENV(app, "HOME", raw"/home/${USER}")
-            #RUN(app, "$(pkg_mgr(app)) update -y", "$(pkg_mgr(app)) upgrade -y")
-            #RUN(app, "$(pkg_mgr(app)) install -y sudo")
             COMMENT(app, "Setting up $(ContainedEnv.user(app)) as a sudo user and create its home")
             RUN(
                 app,
-                "useradd -r -m -U -G sudo -d $(home(app)) -s /bin/bash -c \"Docker SGE user\" $(ContainedEnv.user(app))",
+                "useradd -r -m -U -G $(sudo_group) -d $(home(app)) -s /bin/bash -c \"User $(ContainedEnv.user(app)) of App $(name)\" $(ContainedEnv.user(app))",
                 "echo \"$(ContainedEnv.user(app)) ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee /etc/sudoers.d/$(ContainedEnv.user(app))",
                 "chown -R $(ContainedEnv.user(app)) $(home(app))",
                 "mkdir $(projects(app))",
@@ -553,7 +553,7 @@ function DevApp(
     # Do not setup user 'root', it exists by default
     # And do not bother with creating a pretty bash profile
     if user != "root"
-        add_pkg!(app, user_env)
+        add_pkg!(app, sudouser)
     end
     add_pkg!(app, bash_profile)
     return app
