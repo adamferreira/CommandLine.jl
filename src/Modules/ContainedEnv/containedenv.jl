@@ -11,7 +11,7 @@ Package/Project are installed in 3 steps:
 - Local (host machine)
 - Image ((docker) image)
 - Container
-Step are invoked for Package as callbacks that take `App` as argument
+Steps are invoked for Package as callbacks that take `App` as argument
 """
 struct Package
     name::String
@@ -144,7 +144,7 @@ function pkg_mgr(app::App)
         return "$prefix apt-get"
     end
 
-    if occursin("fedora", app.baseimg) || if occursin("redhat", app.baseimg)
+    if occursin("fedora", app.baseimg) || occursin("redhat", app.baseimg)
         return "$prefix yum"
     end
 
