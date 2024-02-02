@@ -73,11 +73,11 @@ mutable struct App
     # Workspace where all files (including Dockefile) will be copied before copying to image
     workspace::String
     # List of mounts to be passed down to `Docker run`
-    mounts::Vector{Docker.Mount}
+    mounts::Set{Docker.Mount}
     # List of port bindings to be passed down to `Docker run`
-    ports::Vector{Docker.Port}
+    ports::Set{Docker.Port}
     # List of network the app's container is connected to
-    networks::Vector{Docker.Network}
+    networks::Set{Docker.Network}
     # List of active containers for this `App`
     #containers::Vector{Container}
     function App(
@@ -101,7 +101,7 @@ mutable struct App
         #TODO: support MacOS
         home =  ptype == PosixPath ? PosixPath("/home/$(user)") : WindowsPath("C:", "Users", user)
     
-        app = new(name, user, from, home, docker_run, s, nothing, ["FROM $from"], [], workspace, [], [], [])
+        app = new(name, user, from, home, docker_run, s, nothing, ["FROM $from"], [], workspace, Set{Docker.Mount}(), Set{Docker.Port}(), Set{Docker.Network}())
         # If the app points to an already running container, we can already open a shell into it
         # TODO: have an 'open' method?
         if container_running(app)
@@ -438,11 +438,11 @@ function setup_container(app::App, user_run_args::String)
     container_command = "$(image_name(app)) $(app.docker_run)"
     Docker.run(app.hostshell,
         # Mounts
-        Base.join(map(m -> Base.string(m), app.mounts), ' '),
+        Base.join(map(m -> Base.string(m), collect(app.mounts)), ' '),
         # Ports
-        Base.join(map(p -> Base.string(p), app.ports), ' '),
+        Base.join(map(p -> Base.string(p), collect(app.ports)), ' '),
         # Networks
-        Base.join(map(n -> Base.string(n), app.networks), ' '),
+        Base.join(map(n -> Base.string(n), collect(app.networks)), ' '),
         # User arguments
         user_run_args;
         # Container name and bash process to launch in the container
