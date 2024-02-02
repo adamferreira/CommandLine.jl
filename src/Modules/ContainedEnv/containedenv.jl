@@ -12,7 +12,7 @@ Package/Project are installed in 3 steps:
 - Local (host machine)
 - Image ((docker) image)
 - Container
-Step are invoked for Package as callbacks that take `App` as argument
+Steps are invoked for Package as callbacks that take `App` as argument
 """
 struct Package
     name::String
