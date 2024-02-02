@@ -318,6 +318,9 @@ function Base.string(m::Mount)::String
 end
 # Interpolation overloading
 Base.show(io::IO, m::Mount) = print(io, Base.string(m))
+# Colision detection (overload of Set)
+Base.hash(m::Mount) = Base.hash(Base.string(m))
+Base.isequal(a::Mount, b::Mount) = Base.isequal(Base.hash(a), Base.hash(b))
 export Mount
 
 
@@ -334,6 +337,9 @@ function Base.string(p::Port)::String
 end
 # Interpolation overloading
 Base.show(io::IO, p::Port) = print(io, Base.string(p))
+# Colision detection (overload of Set)
+Base.hash(p::Port) = Base.hash(Base.string(p))
+Base.isequal(a::Port, b::Port) = Base.isequal(Base.hash(a), Base.hash(b))
 export Port
 
 
@@ -348,6 +354,9 @@ function Base.string(n::Network)::String
 end
 # Interpolation overloading
 Base.show(io::IO, n::Network) = print(io, Base.string(n))
+# Colision detection (overload of Set)
+Base.hash(n::Network) = Base.hash(Base.string(n))
+Base.isequal(a::Network, b::Network) = Base.isequal(Base.hash(a), Base.hash(b))
 export Network
 
 

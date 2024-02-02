@@ -149,6 +149,7 @@ function __GitHubRepo(
     end
 
     return Package(
+        # Use repository URL as uuid
         "GitHubRepo", "$(repo_url)";
         install_host = on_host,
         install_image = on_image,
@@ -159,6 +160,85 @@ function __GitHubRepo(
     )
 end
 
+# TODO: handle credential file
+function GitRepo(
+    repo_url::String;
+    clone_root::AbstractPath,
+    git_user::String = "",
+    git_usermail::String = "",
+    clone_with_name::String = "",
+    clone_on::Symbol = :host, #[:host, :image, :container]
+)::Package
+    on_host = nothing
+    on_image = nothing
+    on_container = nothing
+    repo_name = clone_with_name == "" ? replace(Base.basename(repo_url), ".git" => "") : clone_with_name
+    repo_dest = Paths.joinpath(clone_root, repo_name)
+
+    tape_record = []
+    # Clone repo in image
+    push!(tape_record, "cd $(clone_root)")
+    push!(tape_record, "<GIT> clone $(repo_url) $(repo_name)")
+    # Trust repo and user
+    push!(tape_record, "<GIT> config --global --add safe.directory $(repo_dest)")
+    # Configure user credentials
+    push!(tape_record, "cd $(repo_dest)")
+    if git_user != ""
+        push!(tape_record, "<GIT> config --local user.name \"$(git_user)\"")
+    end
+    if git_usermail != ""
+        push!(tape_record, "<GIT> config --local user.email $(git_usermail)")
+    end
+
+    if clone_on == :host
+        @error "Cloning git repository on host is not yet supported"
+        on_host = app -> begin
+            @assert CLI.isdir(app.hostshell, clone_root)
+            # Instanciate git command
+            record = map(r -> replace(r, "<GIT>" => app.hostshell["CL_GIT"]), tape_record)
+            # Excecute all the commands as docker RUN commands
+            map(cmd -> CLI.run(app.hostshell, cmd), record)
+        end
+    end
+    
+    if clone_on == :image
+        @warn "Cloning on image is not recommended"
+        on_image = app -> begin
+            # Instanciate git command
+            record = map(r -> replace(r, "<GIT>" => "git"), tape_record)
+            # Add user rights to the newly created repo
+            push!(record, "chown -R $(app.user) $(repo_dest)")
+            RUN(app, record...) 
+        end
+    end
+
+    if clone_on == :container
+        on_container = app -> begin
+            # Instanciate git command
+            record = map(r -> replace(r, "<GIT>" => "git"), tape_record)
+            # Add user rights to the newly created repo (this command takes priority)
+            # TODO: keep sudo calls bellow ? (volumes are created by 'root', then a user on container would not have access)
+            if !CLI.isdir(app.contshell, repo_dest)
+                record = vcat("sudo mkdir $(repo_dest)", "sudo chown -R $(app.user) $(repo_dest)", record)
+            end
+            # Excecute all the commands as bash calls
+            map(cmd -> CLI.run(app.contshell, cmd), record)
+        end
+    end
+
+    return Package(
+        # Use repository URL as uuid
+        "GitRepo", "$(repo_url)";
+        install_host = on_host,
+        install_image = on_image,
+        install_container = on_container,
+        requires = [
+            BasePackage("git"), BasePackage("ca-certificates")
+        ]
+    )
+end
+export GitRepo
+
 function CommandLineDev(user::String, usermail::String, github_token::String)::Package
     return __GitHubRepo(
         "https://github.com/adamferreira/CommandLine.jl.git",
@@ -167,3 +247,89 @@ function CommandLineDev(user::String, usermail::String, github_token::String)::P
         workspace = "~/projects"
     )
 end
+
+"""
+    Mount the given SHH keypair into ~/.shh within the container as local mounts
+"""
+function MountedSSHKeys(local_pub, local_priv, local_known_hosts = nothing)
+    uuid = Base.hash(Base.hash("$local_pub"), Base.hash("$local_priv"))
+    return Package(
+        "MountedSSHKeys", string(uuid); requires = [],
+        install_host = app -> begin
+            # Check on host that the keys indeed exists
+            #@assert CLI.isfile(app.hostshell, local_pub)
+            #@assert CLI.isfile(app.hostshell, local_priv)
+            # Mount keys to the app's home
+            cont_pub = Paths.joinpath(home(app), ".ssh", CLI.basename(app.hostshell, PosixPath(local_pub)))
+            cont_priv = Paths.joinpath(home(app), ".ssh", CLI.basename(app.hostshell, PosixPath(local_priv)))
+            add_mount!(app, Docker.Mount(:hostpath, local_pub, cont_pub))
+            add_mount!(app, Docker.Mount(:hostpath, local_priv, cont_priv))
+            # Include known_hosts file if requested
+            if !isnothing(local_known_hosts)
+                cont_known_hosts = Paths.joinpath(home(app), ".ssh", CLI.basename(app.hostshell, PosixPath(local_known_hosts)))
+                add_mount!(app, Docker.Mount(:hostpath, local_known_hosts, cont_known_hosts))
+            end
+        end
+    )
+end
+export MountedSSHKeys
+
+"""
+    git_repositories = [
+        (repo_url = https://github.com/adamferreira/CommandLine.jl.git, user = "toto", clone_on = :image),
+        (...)
+    ]
+"""
+function create_volume_with_repos(
+    shell::CLI.Shell,
+    volume::Docker.Mount,
+    owner::String = "root",
+    git_repositories::Vector{<:NamedTuple} = [],
+    ssh_pub::Union{Nothing, AbstractPath} = nothing,
+    ssh_priv::Union{Nothing, AbstractPath} = nothing,
+    known_hosts::Union{Nothing, AbstractPath} = nothing
+)
+    vol_name = volume.src
+    vol_mountpoint = volume.target
+    if Docker.volume_exist(shell, "$(vol_name)")
+        @warn "Volume $(vol_name) already exists, exiting procedure :create_volume_with_repos"
+        return nothing
+    end
+
+    # Create a subapp to clone the repositories into the newly created volume
+    gitapp = DevApp(shell, name = "gitapp", user = owner, from = "ubuntu:22.04")
+
+    # Mount SHH keys (and known_hosts file) to clone the repositories if needed
+    if !isnothing(ssh_pub) && !isnothing(ssh_priv)
+        add_pkg!(gitapp, MountedSSHKeys(ssh_pub, ssh_priv, known_hosts))
+    end
+
+    # Add all repo to be cloned as packages
+    map(
+        args -> begin
+            add_pkg!(gitapp,
+                # GitRepo have 'git' and 'ca-certificates' as dependencies
+                GitRepo(
+                    args[:repo_url];
+                    # clone the repository into the volume's target
+                    clone_root = vol_mountpoint,
+                    git_user = args[:git_user],
+                    git_usermail = args[:git_usermail],
+                    clone_with_name = args[:clone_with_name],
+                    # Only chose to clone on :container as we are using the subapp to write in the volume
+                    clone_on = :container
+                )
+            )
+        end
+    , git_repositories)
+
+    # Mount given volume to the subapp
+    add_mount!(gitapp, volume)
+
+    # Start subapp work
+    deploy!(gitapp; regenerate_image = true)
+
+    # Destroy subapp entirely
+    clean_all!(gitapp)
+end
+export create_volume_with_repos

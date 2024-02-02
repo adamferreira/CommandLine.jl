@@ -429,7 +429,7 @@ LocalBashShell = LocalShell{Bash}
 
 
 """
-    `indir(body::Function, s::Shell, dir::String; createdir::Bool = false)`
+    `indir(body::Function, s::Shell, dir::Union{String, AbstractPath}; createdir::Bool = false)`
 Performs all operations in `body` on Shell `s` inside the directly `dir`.
 Arg `createdir` creates `dir` if it does not exist in Shell `s`.
 All instructions in `body` are assumed to run sequentially on `s`.
@@ -439,7 +439,7 @@ After `body` is called, the Shell `s` goes back to its previous current directly
         @assert pwd(s) == "~"
     end
 """
-function indir(body::Function, s::Shell, dir::String; createdir::Bool = false)
+function indir(body::Function, s::Shell, dir; createdir::Bool = false)
     if !CommandLine.isdir(s, dir) && createdir
         CommandLine.mkdir(s, dir)
     end

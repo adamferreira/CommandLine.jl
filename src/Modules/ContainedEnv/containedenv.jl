@@ -2,6 +2,7 @@ module ContainedEnv
 using CommandLine.Paths
 import CommandLine as CLI
 import CommandLine.Docker as Docker
+import CommandLine.Git as Git
 
 """
 Package/Project are Installable, they have identifiers:
@@ -34,7 +35,7 @@ struct Package
 end
 
 BasePackage(pname::String) = Package(pname, "base")
-# Overloads for Set{Package}
+# Overloads for Set{Package} (colision detection)
 Base.hash(p::Package) = Base.hash(Base.hash(p.name), Base.hash(p.tag))
 Base.isequal(a::Package, b::Package) = Base.isequal(Base.hash(a), Base.hash(b))
 function parse_pkg(p::String)
@@ -144,7 +145,7 @@ function pkg_mgr(app::App)
         return "$prefix apt-get"
     end
 
-    if occursin("fedora", app.baseimg) || if occursin("redhat", app.baseimg)
+    if occursin("fedora", app.baseimg) || occursin("redhat", app.baseimg)
         return "$prefix yum"
     end
 
