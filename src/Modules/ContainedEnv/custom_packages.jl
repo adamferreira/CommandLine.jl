@@ -276,7 +276,7 @@ export MountedSSHKeys
 
 """
     git_repositories = [
-        (repo_url = https://github.com/adamferreira/CommandLine.jl.git, user = "toto", clone_on = :image),
+        (repo_url = https://github.com/adamferreira/CommandLine.jl.git, git_user = "toto"),
         (...)
     ]
 """
@@ -333,3 +333,24 @@ function create_volume_with_repos(
     clean_all!(gitapp)
 end
 export create_volume_with_repos
+
+"""
+Mount a volume to ~/.vscode-server in a container.
+when attaching VSCode to a container and installing extensions, all will be installed in the volume instead of the container.
+This will allow persistance of VSCode extension and data accros containers, even if they stop.
+"""
+function VSCodeServer()
+    vserver = app -> Paths.joinpath(ContainedEnv.home(app), ".vscode-server")
+
+    return ContainedEnv.Package(
+        "vscode-server", "v0"; requires = [],
+        install_image = app -> begin
+            # Pre-create dir with open access as VSCode need access to .vscode-server
+            ContainedEnv.RUN(app, "mkdir $(vserver(app))", "chmod 777 $(vserver(app))")
+        end,
+        install_host = app -> begin
+            ContainedEnv.add_mount!(app, Docker.Mount(:volume, "vscode-server", vserver(app)))
+        end
+    )
+end
+export VSCodeServer()
