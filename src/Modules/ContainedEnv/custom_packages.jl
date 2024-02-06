@@ -353,4 +353,25 @@ function VSCodeServer()
         end
     )
 end
-export VSCodeServer()
+export VSCodeServer
+
+"""
+    Get profiling graph using gprof2dot standalone script from: https://github.com/jrfonseca/gprof2dot.
+    This requires graphviz to convert generated dot file to image.
+    Callgrind is used for profiling.
+"""
+function CodeProfiler()
+    return ContainedEnv.Package(
+        "vscode-CodeProfiler", "v0"; requires = [
+            ContainedEnv.BasePackage("python3"), ContainedEnv.BasePackage("graphviz")
+        ],
+        install_image = app -> begin
+            # Install gprof2dot script
+            COPY(app, Base.joinpath(@__DIR__, "gprof2dot.py"), "/opt/gprof2dot.py")
+            # Install bash util functions script
+            COPY(app, Base.joinpath(@__DIR__, "gprof.sh"), "/opt/gprof.sh")
+            RUN(app, "cat /opt/gprof.sh >> $(ContainedEnv.home(app))/.bashrc")
+        end
+    )
+end
+export CodeProfiler
