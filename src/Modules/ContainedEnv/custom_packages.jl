@@ -166,6 +166,7 @@ function GitRepo(
     clone_root::AbstractPath,
     git_user::String = "",
     git_usermail::String = "",
+    github_token::String = "",
     clone_with_name::String = "",
     clone_on::Symbol = :host, #[:host, :image, :container]
 )::Package
@@ -175,10 +176,23 @@ function GitRepo(
     repo_name = clone_with_name == "" ? replace(Base.basename(repo_url), ".git" => "") : clone_with_name
     repo_dest = Paths.joinpath(clone_root, repo_name)
 
+    # If the git reposity is a github repo, we format the repo url to take into account the username
+    # And eventually the token
+    if occursin("github.com", repo_url)
+        if github_token != ""
+            header = "$(git_user):$(github_token)"
+        else
+            header = "$(git_user)"
+        end
+        formatted_repo_url = replace(repo_url, "github.com" => "$(header)@github.com")
+    else
+        formatted_repo_url = repo_url
+    end
+
     tape_record = []
     # Clone repo in image
     push!(tape_record, "cd $(clone_root)")
-    push!(tape_record, "<GIT> clone $(repo_url) $(repo_name)")
+    push!(tape_record, "<GIT> clone $(formatted_repo_url) $(repo_name)")
     # Trust repo and user
     push!(tape_record, "<GIT> config --global --add safe.directory $(repo_dest)")
     # Configure user credentials
@@ -317,7 +331,9 @@ function create_volume_with_repos(
                     git_usermail = args[:git_usermail],
                     clone_with_name = args[:clone_with_name],
                     # Only chose to clone on :container as we are using the subapp to write in the volume
-                    clone_on = :container
+                    clone_on = :container,
+                    # Forward token
+                    github_token = args[:github_token]
                 )
             )
         end
