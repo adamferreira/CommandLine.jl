@@ -523,7 +523,7 @@ function DevApp(
         "sudouser", from;
         install_image = app -> begin
             # 'sudo' group in Fedora is 'wheel'
-            sudo_group = occursin("fedora", app.baseimg) ? "wheel" : "sudo"
+            sudo_group = (occursin("redhat", app.baseimg) || occursin("fedora", app.baseimg)) ? "wheel" : "sudo"
             COMMENT(app, "Setting up global env vars")
             ENV(app, "USER", ContainedEnv.user(app))
             ENV(app, "HOME", raw"/home/${USER}")
