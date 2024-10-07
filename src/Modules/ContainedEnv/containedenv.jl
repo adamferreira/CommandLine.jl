@@ -145,7 +145,7 @@ function pkg_mgr(app::App)
         return "$prefix apt-get"
     end
 
-    if occursin("fedora", app.baseimg) || occursin("redhat", app.baseimg)
+    if occursin("fedora", app.baseimg) || occursin("redhat", app.baseimg) || occursin("centos", app.baseimg)
         return "$prefix yum"
     end
 
@@ -268,6 +268,10 @@ function destroy_image(app::App)
         return nothing
     end
     Docker.image(app.hostshell, "rm"; argument = image["ID"], force=true)
+end
+
+function USER(app::App, user)
+    push!(app.dockerfile_record, "USER $user")
 end
 
 function ENV(app::App, var, val)
@@ -420,7 +424,7 @@ function setup_image(app::App, regenerate_image::Bool)
             )
         else
             Docker.image(shell,
-                "build";
+                "build --no-cache"; # --no-cache Because apt install keeps failing with 404 err
                 tag = image_name(app),
                 argument =  "." # Local Dockerfile in the temporary workspace
             )
