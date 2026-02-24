@@ -225,6 +225,16 @@ for fct in [:container, :image, :volume, :network]
         return JSON.parse.(out)
     end
 
+    @eval function $(Symbol(:inspect_, fct))(s::CLI.Shell, name::String)::Vector{Dict}
+        out = CLI.checkoutput(s,
+            $(fct)(
+                "inspect"
+                ; format="'{{json .}}' $(name)"
+            )
+        )
+        return JSON.parse.(out)
+    end
+
     @eval function $(Symbol(:get_, fct))(s::CLI.Shell, name::String)::Union{Nothing, Dict}
         # For some reasons, docker image ls --filter name=name does not work
         # and require --filter reference=name instead
@@ -257,6 +267,14 @@ function client_version(s::CLI.Shell)::Tuple{Int,Int,Int}
     return parse(Int, m["MAJOR"]), parse(Int, m["MINOR"]), parse(Int, m["PATCH"])
 end
 export client_version
+
+function freeze_container(s::CLI.Shell, contname::String, img::String)
+    @assert container_exist(s, contname)
+    container_id = get_container(s, contname)["ID"]
+    sha256 = CLI.checkoutput(s, commit("$(container_id) $(img)"))
+    return get_image(s, "$(img)")
+end
+export freeze_container
 
 """
     Mount
@@ -350,7 +368,7 @@ struct Network
     end
 end
 function Base.string(n::Network)::String
-    return "--net $(n.name)"
+    return "--network $(n.name)"
 end
 # Interpolation overloading
 Base.show(io::IO, n::Network) = print(io, Base.string(n))

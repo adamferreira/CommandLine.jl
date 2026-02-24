@@ -192,7 +192,7 @@ function GitRepo(
     tape_record = []
     # Clone repo in image
     push!(tape_record, "cd $(clone_root)")
-    push!(tape_record, "<GIT> clone $(formatted_repo_url) $(repo_name)")
+    push!(tape_record, "<GIT> clone --recurse-submodules $(formatted_repo_url) $(repo_name)")
     # Trust repo and user
     push!(tape_record, "<GIT> config --global --add safe.directory $(repo_dest)")
     # Configure user credentials
@@ -240,6 +240,8 @@ function GitRepo(
         end
     end
 
+    @show tape_record
+
     return Package(
         # Use repository URL as uuid
         "GitRepo", "$(repo_url)";
@@ -270,23 +272,40 @@ function MountedSSHKeys(local_pub, local_priv, local_known_hosts = nothing)
     return Package(
         "MountedSSHKeys", string(uuid); requires = [],
         install_host = app -> begin
-            # Check on host that the keys indeed exists
-            #@assert CLI.isfile(app.hostshell, local_pub)
-            #@assert CLI.isfile(app.hostshell, local_priv)
-            # Mount keys to the app's home
-            cont_pub = Paths.joinpath(home(app), ".ssh", CLI.basename(app.hostshell, PosixPath(local_pub)))
-            cont_priv = Paths.joinpath(home(app), ".ssh", CLI.basename(app.hostshell, PosixPath(local_priv)))
-            add_mount!(app, Docker.Mount(:hostpath, local_pub, cont_pub))
-            add_mount!(app, Docker.Mount(:hostpath, local_priv, cont_priv))
-            # Include known_hosts file if requested
-            if !isnothing(local_known_hosts)
-                cont_known_hosts = Paths.joinpath(home(app), ".ssh", CLI.basename(app.hostshell, PosixPath(local_known_hosts)))
-                add_mount!(app, Docker.Mount(:hostpath, local_known_hosts, cont_known_hosts))
+            for local_file in [local_pub, local_priv, local_known_hosts]
+                remote_file = Paths.joinpath(home(app), ".ssh", CLI.basename(app.hostshell, PosixPath(local_file)))
+                if !isnothing(local_file)
+                    add_mount!(app, Docker.Mount(:hostpath, local_file, remote_file))
+                end
+            end
+        end,
+        # Give read rights to mounted files
+        install_container = app -> begin
+            for local_file in [local_pub, local_priv, local_known_hosts]
+                remote_file = Paths.joinpath(home(app), ".ssh", CLI.basename(app.hostshell, PosixPath(local_file)))
+                if !isnothing(local_file)
+                    CLI.run(app.contshell, "sudo chmod -R o+r $(remote_file)")
+                end
             end
         end
     )
 end
 export MountedSSHKeys
+
+function SSHKeys(local_pub, local_priv, local_known_hosts = nothing)
+    uuid = Base.hash(Base.hash("$local_pub"), Base.hash("$local_priv"))
+    return Package(
+        "SSHKeys", string(uuid); requires = [],
+        install_image = app -> begin
+            for file in [local_pub, local_priv, local_known_hosts]
+                if !isnothing(file)
+                    COPY(app, file, Paths.joinpath(home(app), ".ssh", CLI.basename(app.hostshell, PosixPath(file))); chmod = "400")
+                end
+            end
+        end
+    )
+end
+export SSHKeys
 
 """
     git_repositories = [
@@ -306,16 +325,16 @@ function create_volume_with_repos(
     vol_name = volume.src
     vol_mountpoint = volume.target
     if Docker.volume_exist(shell, "$(vol_name)")
-        @warn "Volume $(vol_name) already exists, exiting procedure :create_volume_with_repos"
+        @warn "Volume `$(vol_name)` already exists, exiting procedure :create_volume_with_repos"
         return nothing
     end
 
     # Create a subapp to clone the repositories into the newly created volume
-    gitapp = DevApp(shell, name = "gitapp", user = owner, from = "ubuntu:22.04")
+    gitapp = DevApp(shell, name = "gitapp", user = owner, from = "ubuntu:24.04")
 
     # Mount SHH keys (and known_hosts file) to clone the repositories if needed
     if !isnothing(ssh_pub) && !isnothing(ssh_priv)
-        add_pkg!(gitapp, MountedSSHKeys(ssh_pub, ssh_priv, known_hosts))
+        add_pkg!(gitapp, SSHKeys(ssh_pub, ssh_priv, known_hosts))
     end
 
     # Add all repo to be cloned as packages
@@ -362,10 +381,10 @@ function VSCodeServer()
         "vscode-server", "v0"; requires = [],
         install_image = app -> begin
             # Pre-create dir with open access as VSCode need access to .vscode-server
-            ContainedEnv.RUN(app, "mkdir $(vserver(app))", "chmod 777 $(vserver(app))")
+            ContainedEnv.RUN(app, "mkdir $(vserver(app))", "chown -R $(user(app)) $(vserver(app))")
         end,
         install_host = app -> begin
-            ContainedEnv.add_mount!(app, Docker.Mount(:volume, "vscode-server", vserver(app)))
+            ContainedEnv.add_mount!(app, Docker.Mount(:volume, "vscode-server-$(app_name(app))", vserver(app)))
         end
     )
 end

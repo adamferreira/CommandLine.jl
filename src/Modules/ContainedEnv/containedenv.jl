@@ -33,8 +33,9 @@ struct Package
         return new(name, tag, install_host, install_image, install_container, requires)
     end    
 end
-
 BasePackage(pname::String) = Package(pname, "base")
+export Package, BasePackage
+
 # Overloads for Set{Package} (colision detection)
 Base.hash(p::Package) = Base.hash(Base.hash(p.name), Base.hash(p.tag))
 Base.isequal(a::Package, b::Package) = Base.isequal(Base.hash(a), Base.hash(b))
@@ -54,6 +55,8 @@ end
 mutable struct App
     # Name of the app to be deployed
     appname::String
+    # Tag for App's image
+    tag::String
     # Username to use in the container
     user::String
     # Base image name form wich creating ContainedEnv image
@@ -83,6 +86,7 @@ mutable struct App
     function App(
         s::CLI.Shell;
         name,
+        tag = "latest",
         user = "root",
         from = "ubuntu:22.04",
         workspace = Base.pwd(),
@@ -101,7 +105,7 @@ mutable struct App
         #TODO: support MacOS
         home =  ptype == PosixPath ? PosixPath("/home/$(user)") : WindowsPath("C:", "Users", user)
     
-        app = new(name, user, from, home, docker_run, s, nothing, ["FROM $from"], [], workspace, Set{Docker.Mount}(), Set{Docker.Port}(), Set{Docker.Network}())
+        app = new(name, tag, user, from, home, docker_run, s, nothing, ["FROM $from"], [], workspace, Set{Docker.Mount}(), Set{Docker.Port}(), Set{Docker.Network}())
         # If the app points to an already running container, we can already open a shell into it
         # TODO: have an 'open' method?
         if container_running(app)
@@ -115,6 +119,7 @@ mutable struct App
         return app
     end
 end
+export App
 
 """
     Container
@@ -153,6 +158,7 @@ function pkg_mgr(app::App)
         return "$prefix apk"
     end
 end
+export Container
 
 function add_pkg!(app::App, p::Package)
     push!(app.packages, p)
@@ -163,20 +169,25 @@ end
 function add_mount!(app::App, m::Docker.Mount)
     push!(app.mounts, m)
 end
+export add_mount!
 
 function add_port!(app::App, p::Docker.Port)
     push!(app.ports, p)
 end
+export add_port!s
 
 function add_network!(app::App, n::Docker.Network)
     push!(app.networks, n)
 end
+export add_network!
 
 # ---------------------------
 # Docker Wrapper
 # ---------------------------
-container_name(app::App) = "$(app.appname)_ctn"
-image_name(app::App) = "$(app.appname)_img"
+app_name(app::App) = app.appname
+container_name(app::App) = "$(app.appname)"
+image_name(app::App) = "$(app.appname):$(app.tag)"
+export container_name, image_name, image_name
 
 # ---------------------------
 # Utilitaries
@@ -185,6 +196,7 @@ pathtype(app::App)::Type{AbstractPath} = type(app.home)
 home(app::App)::AbstractPath = app.home
 user(app::App)::String = app.user
 projects(app::App)::AbstractPath = Paths.joinpath(home(app), "projects")
+export pathtype, home, user, projects
 
 # ---------------------------
 # Container related
@@ -211,6 +223,7 @@ end
 function container_running(app::App)::Bool
     return Docker.container_running(app.hostshell, container_name(app))
 end
+export container_running
 
 function new_container_shell(app::App)::CLI.Shell
     container_running(app) || @error("Cannot open a new Shell in container $(container_name(app)): container not running")
@@ -218,6 +231,7 @@ function new_container_shell(app::App)::CLI.Shell
     # Otherwise the command will not work: use CLI.connection_type(app.hostshell)
     return CLI.Shell{CLI.Bash, CLI.Local}(container_shell_cmd(app, false); pwd = "~")
 end
+export new_container_shell
 
 function destroy_container(app::App)
     container = Docker.get_container(app.hostshell, container_name(app))
@@ -240,6 +254,7 @@ function destroy_container(app::App)
     # Destroy the container
     Docker.rm(app.hostshell; force=true, argument=container_name(app))
 end
+export destroy_container
 
 #function next_container_name(app::App)
 #    return "$(app.appname)_ctn_$(length(app.containers))"
@@ -261,14 +276,22 @@ function image_exist(app::App)
     image = Docker.get_image(app.hostshell, image_name(app))
     return !isnothing(image)
 end
+export image_exist
 
 function destroy_image(app::App)
     image = Docker.get_image(app.hostshell, image_name(app))
     if isnothing(image)
         return nothing
     end
-    Docker.image(app.hostshell, "rm"; argument = image["ID"], force=true)
+    try
+        Docker.image(app.hostshell, "rm"; argument = image["ID"], force=true)
+    catch e
+        # The app image might have a hidden parent image that need need to destroy first
+        #parent_id = Docker.inspect_image(app.hostshell, image["ID"])[1]["Parent"]
+        Docker.image(app.hostshell, "rm"; argument = image_name(app), force=true)
+    end
 end
+export destroy_image
 
 function USER(app::App, user)
     push!(app.dockerfile_record, "USER $user")
@@ -290,7 +313,7 @@ function ARG(app::App, var, val)
     push!(app.dockerfile_record, "ARG $var=$val")
 end
 
-function COPY(app::App, from, to)
+function COPY(app::App, from, to; chmod = nothing)
     # Format to posix because app.hostshell must be posix shell for now
     from = CLI.cygpath(app.hostshell, from, "-u")
     file = CLI.basename(app.hostshell, from)
@@ -298,7 +321,11 @@ function COPY(app::App, from, to)
     @assert CLI.isfile(app.hostshell, from)
     # Copy files from host to App's temporary workspace
     CLI.cp(app.hostshell, from, app.workspace)
-    push!(app.dockerfile_record, "COPY $file $to")
+    #push!(app.dockerfile_record, "COPY --chown=$(user(app)) $file $to")
+    push!(app.dockerfile_record, "COPY --chown=$(user(app)) $file $to")
+    if !isnothing(chmod)
+        RUN(app, "chmod $(chmod) $to")
+    end
 end
 
 function RUN(app::App, cmds::String...)
@@ -315,6 +342,12 @@ function COMMENT(d::App, lines::String...)
     map(l -> COMMENT(d, l), lines...)
 end
 
+function COPY_FROM(app::App, from::String, src::AbstractPath, dest::AbstractPath)
+    push!(app.dockerfile_record, "COPY --chown=$(user(app)) --from=$(from) $(src) $(dest)")
+end
+
+export USER, ENV, ADDENV, LABEL, ARG, COPY, RUN, COMMENT, COPY_FROM 
+
 # ---------------------------
 # Host related
 # ---------------------------
@@ -323,12 +356,14 @@ function clean_workspace(app::App)
         CLI.rm(app.hostshell, "-rf", app.workspace)
     end
 end
+export clean_workspace
 
 function create_workspace(app::App)
     @assert !CLI.isdir(app.hostshell, app.workspace)
     CLI.mkdir(app.hostshell, app.workspace)
     @assert CLI.isdir(app.hostshell, app.workspace)
 end
+export create_workspace
 
 # ----- Step 0: local setup (dummy recursive depth-first search) ---
 function packages_queue(app::App)
@@ -354,6 +389,7 @@ function packages_queue(app::App)
 
     return base_pkg, pkg_queue
 end
+export packages_queue
 
 # ----- Step 1: local setup ---
 function setup_host(app::App)
@@ -377,6 +413,8 @@ function setup_image(app::App, regenerate_image::Bool)
     if image_exist(app)
         if regenerate_image
             destroy_image(app)
+        else
+            return
         end
     end
 
@@ -431,6 +469,7 @@ function setup_image(app::App, regenerate_image::Bool)
         end
     end
 end
+export setup_image
 
 # ----- Step 3: container setup ---
 function setup_container(app::App, user_run_args::String)
@@ -476,6 +515,7 @@ function clean_all!(app::App)
     destroy_container(app)
     destroy_image(app)
 end
+export clean_all!
 
 """
 - `regenerate_image::Bool`: Skip image construction and use existing image for `app`
@@ -500,13 +540,7 @@ function deploy!(
     end
     
 end
-
-
-export  Package, BasePackage,
-        App, Container, ENV, COPY, RUN,
-        add_pkg!, add_mount!, add_port!, deploy!, clean_all!,
-        home,
-        container_shell_cmd, new_container_shell, container_running, packages_queue
+export deploy!
 
 include("custom_packages.jl")
 export  JuliaLinux
@@ -518,10 +552,11 @@ function DevApp(
     name,
     user = "root",
     from = "ubuntu:22.04",
+    tag = "latest",
     workspace = Base.pwd()
 )::App
     # (bash -l -> --login so that bash loads .bash_profile)
-    app = App(s, name=name, user=user, from=from, workspace=workspace, docker_run="bash -l")
+    app = App(s, name=name, user=user, from=from, tag=tag, workspace=workspace, docker_run="bash -l")
     # Setup custom user as a sudo-user and creates its home directory
     sudouser = Package(
         "sudouser", from;
@@ -563,6 +598,6 @@ function DevApp(
     add_pkg!(app, bash_profile)
     return app
 end
-
 export DevApp
+
 end
