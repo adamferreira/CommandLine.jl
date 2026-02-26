@@ -406,7 +406,7 @@ end
 
 function LocalGitBash(; kwargs...)
     if Sys.iswindows()
-        return Shell{Bash,Local}("C:/Program Files/Git/bin/bash.exe"; kwargs...)
+        return Shell{Bash, Local}("C:/Program Files/Git/bin/bash.exe"; kwargs...)
     else
         error("GitBash Shell is not supported for Linux yet")
     end

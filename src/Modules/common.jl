@@ -24,3 +24,12 @@ function make_cmd(args...; kwargs...)::String
 
     return "$strargs $strkwargs $last_arg"
 end
+
+function GitBash()::Shell
+    s = LocalGitBash(; pwd = "~", env = Dict{String, String}())
+    s["CL_DOCKER"] = "docker"
+    # Required on GitBash, otherwise docker mounts does not work (path are messed up) !
+    run(s, "export MSYS_NO_PATHCONV=1")
+    return s
+end
+export GitBash

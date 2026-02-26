@@ -93,6 +93,7 @@ include("Modules/common.jl") # Util `make_cmd`
 include("Modules/docker.jl")
 include("Modules/git.jl")
 include("Modules/ContainedEnv/containedenv.jl")
+include("Modules/WSL/WSL.jl")
 
 # Precompile CommandLine package
 __precompile__()
