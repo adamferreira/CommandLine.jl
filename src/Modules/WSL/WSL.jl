@@ -6,6 +6,22 @@ import CommandLine as CLI
 import CSV as CSV
 import DataFrames as DF
 
+# Struct to hold two paths
+# One on the host, one on the instance
+# Mostly used to copy fro mhost to instance and vice-versa
+struct PathBridge
+    host::Paths.WindowsPath
+    instance::Paths.PosixPath
+
+    function PathBridge(h::Paths.WindowsPath, i::Paths.PosixPath)
+        return new(h,i)
+    end
+
+    PathBridge(p::Pair{Paths.WindowsPath, Paths.PosixPath}) = PathBridge(p.first, p.second)
+end
+
+joinbridge(pb::PathBridge, args...) = PathBridge(Paths.joinpath(pb.host, args...) => Paths.joinpath(pb.instance, args...))
+
 mutable struct WSLInstance
     # Custom name of the instance
     name::String
@@ -14,30 +30,28 @@ mutable struct WSLInstance
     # Shell running on the host machine/OS
     hostshell::Union{Nothing, CLI.Shell}
     # Workspace where all files will be copied before copying into the running instance, lives on host
-    workspace_host::Paths.AbstractPath
-    # Workspace, but its posix path as mounted by WSL
-    workspace_instance::Paths.PosixPath
+    workspace::Paths.WindowsPath
     # Filesystem directory for the instance
     # Contains the .vhdx file and other utils used by this package
-    fsroot_host::Paths.AbstractPath
-    fsroot_instance::Paths.PosixPath
+    fsroot_host::Paths.WindowsPath
+    # Package manager
+    pkmg
 
     function WSLInstance(
         name::String,
         user::String,
-        filesystem_root::Union{String, Paths.AbstractPath},
+        filesystem_root::Union{String, Paths.WindowsPath},
         s::CLI.Shell = CLI.GitBash();
     )
         # Create temporary workspace for this app (posix path form)
         wpname = "$(name)_$(Base.hash(name))"
         workspace_host = Paths.pathtype()(Base.joinpath(Base.pwd(), wpname))
-        workspace_instance = mounted_path(workspace_host)
 
         # Get paths for root filesystem
         fsroot_host = Paths.pathtype()("$(filesystem_root)")
-        fsroot_instance = mounted_path(fsroot_host)
 
-        wsli = new(name, user, s, workspace_host, workspace_instance, fsroot_host, fsroot_instance)
+        wsli = new(name, user, s, workspace_host, fsroot_host, nothing)
+        wsli.pkmg = PkgManager(wsli)
         return wsli
     end
 end
@@ -49,18 +63,14 @@ user(wsli::WSLInstance) = wsli.user
 export user
 hostshell(wsli::WSLInstance) = wsli.hostshell
 export hostshell
-workspace(wsli::WSLInstance) = wsli.workspace_host
+workspace(wsli::WSLInstance) = wsli.workspace
 export workspace
-workspace_instance(wsli::WSLInstance) = wsli.workspace_instance
-export workspace_instance
 home(wsli::WSLInstance) = Paths.PosixPath("/home/$(user(wsli))")
 export home
 cachedir(wsli::WSLInstance) = Paths.joinpath(home(wsli), ".wsljl")
 export cachedir
 fsroot(wsli::WSLInstance) = wsli.fsroot_host
 export fsroot
-fsroot_instance(wsli::WSLInstance) = wsli.fsroot_instance
-export fsroot_instance
 
 # Get the mounted paths in the instance of a path in the host
 function mounted_path(p::Union{String, Paths.AbstractPath})::Paths.PosixPath
@@ -87,24 +97,32 @@ function __run_on_instance(wsli::WSLInstance, cmd; user = "root", dir = "/home")
     _cmd = map(s -> string(s), split("$(cmd)", ' '))
     _user = map(s -> string(s), split("$(user)", ' '))
     _dir = map(s -> string(s), split("$(dir)", ' '))
-    run(
-        Cmd([
-            "wsl", "--distribution", name(wsli),
-            "--user", _user...,
-            "--cd", _dir...,
-            _cmd...
-        ])
-    )
-    #Base.run(`wsl --distribution $(name(wsli)) --user $(user) $(cmd)`)
+    c = [
+        "wsl", "--distribution", name(wsli),
+        "--user", _user...,
+        "--cd", _dir...,
+        _cmd...
+    ]
+    #run_on_host_interactive(wsli, Cmd(c))
+
+    # Will only update the last line in the console
+    # This will avoid long output put will still showcase a progress
+    CLI.run_with(hostshell(wsli), join(c, " "), x -> print("$(x)\u001b[1000D"))
+    # Flush
+    println(" \u001b[1000D")
 end
 
 run_on_instance(wsli::WSLInstance, cmd) = __run_on_instance(wsli, cmd; user = user(wsli), dir = home(wsli))
-run_on_instance_as_root(wsli::WSLInstance, cmd) = __run_on_instance(wsli, cmd; user = "root", dir = "/root")
+run_on_instance_as_root(wsli::WSLInstance, cmd) = __run_on_instance(wsli, cmd; user = "root", dir = "/home")
 export run_on_instance, run_on_instance_as_root
+
+copy_to_instance(wsli::WSLInstance, pb::PathBridge) = run_on_instance(wsli, "sudo cp -r $(mounted_path(pb.host)) $(pb.instance)")
+copy_to_host(wsli::WSLInstance, pb::PathBridge) = run_on_instance(wsli, "cp -r $(pb.instance) $(mounted_path(pb.host))")
+
 
 function clean_workspace(wsli::WSLInstance)
     if isdir(workspace(wsli) |> string)
-        @info "Cleaning workspace $(workspace(wsli))"
+        @warn "Cleaning workspace `$(workspace(wsli))`"
         rm(workspace(wsli) |> string, recursive = true)
     end
 end
@@ -114,7 +132,7 @@ function create_workspace(wsli::WSLInstance)
     if isdir(hostshell(wsli) |> string)
         clean_workspace(wsli)
     end
-    @info "Creating workspace $(workspace(wsli))"
+    @info "Creating workspace `$(workspace(wsli))`"
     mkdir(workspace(wsli) |> string)
 end
 export create_workspace
@@ -149,15 +167,15 @@ unregister(wsli::WSLInstance) = run_on_host_interactive(wsli, `wsl --unregister 
 
 function import_from_scratch!(
     wsli::WSLInstance;
-    local_tarball::Union{Nothing, Paths.AbstractPath} = nothing,
+    local_tarball::Union{Nothing, Paths.WindowsPath} = nothing,
     remote_tarball::Union{Nothing, String} = nothing,
     regenerate_if_exists::Bool = false,
 )
 
-    function deploy_from_local_tarball(wsli::WSLInstance, tarball::Paths.AbstractPath)
+    function deploy_from_local_tarball(wsli::WSLInstance, tarball::Paths.WindowsPath)
         # Cleanup
         if exits(wsli) && regenerate_if_exists
-            @info "Wipping $(name(wsli))"
+            @warn "Wipping instance `$(name(wsli))`"
             unregister(wsli)
         end
         
@@ -179,7 +197,7 @@ function import_from_scratch!(
         end
 
         # Create instance
-        @info "Deploying instance $(name(wsli))"
+        @info "Deploying instance `$(name(wsli))`"
         @debug "from $(tarball) with fs root $(fsroot(wsli))"
         if exits(wsli)
             throw("Instance $(name(wsli)) already exists")
@@ -188,18 +206,14 @@ function import_from_scratch!(
 
         # Now that the instance is running, setup the user
         # 'sudo' group in Fedora is 'wheel'
-        @info "Creating user $(user(wsli))"
+        @info "Creating user `$(user(wsli))`"
         p = joinpath(@__DIR__, "wsl_instance_setup.sh")
         run_on_instance_as_root(wsli, "bash $(mounted_path(p)) $(user(wsli))")
+        # At this point, custom user exists
+        run_on_instance(wsli, "sudo mkdir $(cachedir(wsli))")
         # Create user bashrc
         bash_profile = Paths.pathtype()(joinpath(dirname(@__DIR__), "ContainedEnv", "bash_profile"))
-        run_on_instance(wsli, "cp $(mounted_path(bash_profile)) $(home(wsli))/.bash_profile")
-
-        @info "Updating package manager"
-        run_on_instance(wsli, "sudo apt-get upgrade -y") # --fix-missing
-        run_on_instance(wsli, "sudo apt-get update -y")
-
-        pkmg = PkgManager(wsli)
+        copy_to_instance(wsli, PathBridge(bash_profile => Paths.joinpath(home(wsli), ".bash_profile")))
     end
 
     function deploy_from_remote_tarball(wsli::WSLInstance, url::String)
@@ -223,9 +237,13 @@ function import_from_scratch!(
         if !isnothing(remote_tarball)
             deploy_from_remote_tarball(wsli, remote_tarball)
         end
+
+        instantiate!(wsli.pkmg)
     catch e
         # If anything goes wrong, remove everything related to the app
-        unregister(wsli)
+        if exits(wsli)
+            #unregister(wsli)
+        end
         rethrow(e)
     finally
         # Destroy temporary workspace now that everything is setup
@@ -241,16 +259,9 @@ export enter
 
 
 
-
-
-
-
-
-
-
 struct Package
     name::String
-    version::VersionNumber
+    version::Union{Nothing, VersionNumber}
     on_install::Union{Nothing, Function}
     on_update::Union{Nothing, Function}
     on_delete::Union{Nothing, Function}
@@ -258,7 +269,7 @@ struct Package
 
     function Package(
         name::String,
-        version::VersionNumber;
+        version::Union{Nothing, VersionNumber} = nothing;
         requires = [],
         on_install::Union{Nothing, Function} = nothing,
         on_update::Union{Nothing, Function} = nothing,
@@ -267,35 +278,188 @@ struct Package
         return new(name, version, on_install, on_update, on_delete, requires)
     end
 end
-uid(p::Package)::String = "$(Base.hash(p.name))__$(Base.hash(p.version))"
+export Package
+name(p::Package) = p.name
+version(p::Package) = p.version
+versionstr(p::Package) = isnothing(version(p)) ? "default" : "$(version(p))"
+uid(p::Package)::String = "$(Base.hash(name(p)))__$(Base.hash(versionstr(p)))"
+
+# Overloads for Set{Package} (colision detection)
+Base.hash(p::Package) = Base.hash(Base.hash(name(p)), Base.hash(versionstr(p)))
+Base.isequal(a::Package, b::Package) = Base.isequal(Base.hash(a), Base.hash(b))
+
+mutable struct PackageData
+    already_on_host::Bool
+    already_on_instance::Bool
+    should_run_install::Bool
+    should_run_update::Bool
+    should_run_delete::Bool
+
+    function PackageData()
+        return new(false, false, false, false, false)
+    end
+end
 
 mutable struct PkgManager
     # Pointer to the WSL instance this Package Manager oversees
     wsli::WSLInstance
-    store::DF.DataFrame
+    store::Dict{Package, PackageData}
+    # Packages not yet processed
+    packages::Set{Package}
+    # Buffer to store current package being processed
+    # This means PkgManager can only run sequentially
+    current_pkg::Union{Nothing, Package}
+    current_pkg_buffer::Vector{String}
+    current_pkg_mutex::Base.Threads.Condition
 
     function PkgManager(wsli::WSLInstance)
-        pkmg = new(wsli, DF.DataFrame())
-        # Load pkg store file (create it if it doesn't exits)
-        if !isfile(storefile(pkmg) |> string)
-            touch(storefile(pkmg) |> string)
-        else
-            pkmg.store = DF.DataFrame(CSV.File(storefile(pkmg) |> string))
-        end
+        pkmg = new(wsli, Dict{Package, PackageData}(), Set{Package}(), nothing, Vector{String}(), Base.Threads.Condition())
         return pkmg
     end
 end
+export PkgManager
 
 # Where all packages data are stored on the instance
-storedir(pkmg::PkgManager) = Paths.joinpath(cachedir(pkmg.wsli), "packages")
+storedir(pkmg::PkgManager) = PathBridge(Paths.joinpath(workspace(pkmg.wsli), "packages") => Paths.joinpath(cachedir(pkmg.wsli), "packages"))
 # CSV that stores, for each packages, their detailed information
-storefile(pkmg::PkgManager) = Paths.joinpath(storedir(pkmg), "packages.csv")
+storefile(pkmg::PkgManager) = joinbridge(storedir(pkmg), "packages.csv")
 # For a given package, gives the path to its data folder
-pkg_datadir(pkmg::PkgManager, p::Package) = Paths.joinpath(storedir(pkmg), uid(p))
+pkg_datadir(pkmg::PkgManager, p::Package) = joinbridge(storedir(pkmg), uid(p))
 # Files used to install, update, or delete a package
-pkg_install_file(pkmg::PkgManager, p::Package) = Paths.joinpath(pkg_datadir(pkmg, p), "install.sh")
-pkg_update_file(pkmg::PkgManager, p::Package) = Paths.joinpath(pkg_datadir(pkmg, p), "update.sh")
-pkg_delete_file(pkmg::PkgManager, p::Package) = Paths.joinpath(pkg_datadir(pkmg, p), "delete.sh")
+pkg_data_file(pkmg::PkgManager, p::Package) = joinbridge(pkg_datadir(pkmg, p), "data.json")
+pkg_install_file(pkmg::PkgManager, p::Package) = joinbridge(pkg_datadir(pkmg, p), "install.sh")
+pkg_update_file(pkmg::PkgManager, p::Package) = joinbridge(pkg_datadir(pkmg, p), "update.sh")
+pkg_delete_file(pkmg::PkgManager, p::Package) = joinbridge(pkg_datadir(pkmg, p), "delete.sh")
 
+function RUN(pkmg::PkgManager, cmd::String)
+    push!(pkmg.current_pkg_buffer, cmd)
+end
+RUN(wsli::WSLInstance, p::Package) = RUN(wsli.pkmg, p)
+
+function has_pkg(pkmg::PkgManager, p::Package)
+    return haskey(pkmg.store, p)
+end
+
+function fetch_pkg_data!(pkmg::PkgManager, p::Package)
+    if !has_pkg(pkmg, p)
+        dt = PackageData()
+        # Trick to see if a package is already on the instance
+        # Simply try to fetch its datafile
+        try
+            # Will throw if datafile does not exist
+            run_on_host(pkmg.wsli, "sudo ls $(pkg_data_file(pkmg, p).instance)")
+            dt.already_on_instance = true
+            dt.should_run_install = false
+        catch
+            dt.already_on_instance = false
+            dt.should_run_install = true
+        finally
+            pkmg.store[p] = dt
+        end
+    end
+
+    return pkmg.store[p]
+end
+
+function add_pkg!(pkmg::PkgManager, p::Package)
+    push!(pkmg.packages, p)
+end
+add_pkg!(wsli::WSLInstance, p::Package) = add_pkg!(wsli.pkmg, p)
+
+function register_pkg!(pkmg::PkgManager, p::Package)
+    # First, add package dependancies
+    map(pp -> register_pkg!(pkmg, pp), p.dependencies)
+
+    # Register package to store
+    dt = fetch_pkg_data!(pkmg, p)
+
+    # Package already processed, quit
+    if dt.already_on_host
+        return nothing
+    end
+
+    if !dt.already_on_instance
+        # Create package cache folder on instance
+        run_on_instance(pkmg.wsli, "sudo mkdir -p $(pkg_datadir(pkmg, p).instance)")
+    end
+
+    # Create package cache folder on host
+    if !isdir(pkg_datadir(pkmg, p).host |> string)
+        mkdir(pkg_datadir(pkmg, p).host |> string)
+    end
+
+    # Generate `install.sh` of package of host, and send it to the instance
+    if !isfile(pkg_install_file(pkmg, p).host |> string)
+        touch(pkg_install_file(pkmg, p).host |> string)
+    end
+    if !isnothing(p.on_install)
+        # This will fill `pkmg.current_pkg_buffer`
+        lock(pkmg.current_pkg_mutex) do
+            pkmg.current_pkg = p
+            pkmg.current_pkg_buffer = Vector{String}()
+            p.on_install(pkmg)
+        end
+        # Now, put the content in the package's file
+        open(pkg_install_file(pkmg, p).host |> string, "w+") do f
+            for line in pkmg.current_pkg_buffer
+                write(f, line * "\n")
+            end
+        end
+    end
+    copy_to_instance(pkmg.wsli, pkg_install_file(pkmg, p))
+    dt.already_on_host = true
+    dt.already_on_instance = true
+    dt.should_run_install = true
+
+
+    pkmg.store[p] = dt
+    return nothing
+end
+
+function install_pkg!(pkmg::PkgManager, p::Package)
+    add_pkg!(pkmg, p)
+
+    if !pkmg.store[p].should_run_install
+        return nothing
+    end
+
+    # Install package dependencies, is needed
+    map(pp -> install_pkg!(pkmg, pp), p.dependencies)
+
+    # Install actual package
+    @info "Installing package `$(name(p)): $(versionstr(p))`"
+    run_on_instance(pkmg.wsli, "sudo bash $(pkg_install_file(pkmg, p).instance)")
+    pkmg.store[p].should_run_install = false
+    return nothing
+end
+install_pkg!(wsli::WSLInstance, p::Package) = install_pkg!(wsli.pkmg, p)
+export install_pkg!
+
+function instantiate!(pkmg::PkgManager)
+    # Local data setup
+    if !isdir(storedir(pkmg).host |> string)
+        mkdir(storedir(pkmg).host |> string)
+    end
+
+    # Get package data
+    for p in pkmg.packages
+        fetch_pkg_data!(pkmg, p)
+    end
+
+    # Host workspace step
+    for p in keys(pkmg.store)
+        register_pkg!(pkmg, p)
+    end
+
+    # Install step
+    for p in keys(pkmg.store)
+        install_pkg!(pkmg, p)
+    end
+    # Update step
+
+    # Delete step
+end
+
+include("packages.jl")
 
 end # Module WSL
