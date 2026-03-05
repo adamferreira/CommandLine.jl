@@ -220,8 +220,8 @@ function running_instances(s::CLI.Shell = CLI.GitBash())::Vector{String}
 end
 export running_instances
 
-exits(wsli::WSLInstance)::Bool = name(wsli) in list_instances(hostshell(wsli))
-export exits
+exists(wsli::WSLInstance)::Bool = name(wsli) in list_instances(hostshell(wsli))
+export exists
 isrunning(wsli::WSLInstance)::Bool = name(wsli) in running_instances(hostshell(wsli))
 export isrunning
 
@@ -258,7 +258,7 @@ function import_from_scratch!(
         # Create instance
         info(wsli, "Deploying instance `$(name(wsli))`")
         #"from $(tarball) with fs root $(fsroot(wsli))")
-        if exits(wsli)
+        if exists(wsli)
             throw("Instance $(name(wsli)) already exists")
         end
         run_on_host_interactive(wsli, `wsl --import $(name(wsli)) $(fsroot(wsli)) $(tarball)`)
@@ -307,19 +307,16 @@ function import_from_scratch!(
         if !isnothing(local_tarball) && !isnothing(remote_tarball)
             throw("Can't have value set for both local_tarball and remote_tarball")
         end
-
-        # Cleanup
-        if exits(wsli)
+        if exists(wsli)
             if regenerate_if_exists
                 warn(wsli, "Wipping instance `$(name(wsli))`")
                 unregister!(wsli)
             else
                 warn(wsli, "Instance `$(name(wsli))` already exists")
-                return
             end
         end
 
-        if !(exits(wsli) && regenerate_if_exists)
+        if !exists(wsli) || (exists(wsli) && regenerate_if_exists)
             if !isnothing(local_tarball)
                 wsli.tarball_location = local_tarball
                 deploy_from_local_tarball(wsli, wsli.tarball_location)
@@ -329,11 +326,10 @@ function import_from_scratch!(
                 deploy_from_remote_tarball(wsli, remote_tarball)
             end
         end
-
         instantiate!(wsli.pkmg)
     catch e
         # If anything goes wrong, remove everything related to the app
-        if exits(wsli)
+        if exists(wsli)
             #unregister!(wsli)
         end
         rethrow(e)
@@ -380,8 +376,6 @@ struct Package
     on_bashrc::Union{Nothing, Function}
     # Callback (WSLInstance) -> Vector{Paths.AbstractPath} that gives files or folders exposed by the package, usefull for shared packages
     exposes::Union{Nothing, Function}
-    # Environments variable to be added to the user's bashrc
-    with_env::Dict{String, String}
     dependencies
 
     function Package(
@@ -397,8 +391,7 @@ struct Package
         on_update::Union{Nothing, Function} = nothing,
         on_delete::Union{Nothing, Function} = nothing,
         on_bashrc::Union{Nothing, Function} = nothing,
-        exposes::Union{Nothing, Function} = nothing,
-        with_env::Dict{String, String} = Dict{String, String}()
+        exposes::Union{Nothing, Function} = nothing
     )
         # Default callbacks
         __should_build = nothing
@@ -425,7 +418,7 @@ struct Package
             name, version, 
             __should_build, __should_install, __should_update, __should_delete, 
             on_build, on_install, on_update, on_delete, on_bashrc, 
-            __exposes, with_env,
+            __exposes,
             requires
         )
     end
@@ -463,11 +456,12 @@ mutable struct PkgManager
     # Buffer to store current package being processed
     # This means PkgManager can only run sequentially
     current_pkg::Union{Nothing, Package}
-    current_pkg_buffer::Vector{String}
+    current_pkg_cmds_buffer::Vector{String}
+    current_pkg_env_buffer::Dict{String, String}
     current_pkg_mutex::Base.Threads.Condition
 
     function PkgManager(wsli::WSLInstance)
-        pkmg = new(wsli, Dict{Package, PackageData}(), Set{Package}(), nothing, Vector{String}(), Base.Threads.Condition())
+        pkmg = new(wsli, Dict{Package, PackageData}(), Set{Package}(), nothing, Vector{String}(), Dict{String, String}(), Base.Threads.Condition())
         return pkmg
     end
 end
@@ -490,10 +484,23 @@ pkg_delete_file(pkmg::PkgManager, p::Package) = joinbridge(pkg_datadir(pkmg, p),
 current_pkg(pkmg::PkgManager) = pkmg.current_pkg
 current_pkg(wsli::WSLInstance) = current_pkg(wsli.pkmg)
 
-function RUN(pkmg::PkgManager, cmd::String)
-    push!(pkmg.current_pkg_buffer, cmd)
+function CMD(pkmg::PkgManager, cmd::String)
+    push!(pkmg.current_pkg_cmds_buffer, cmd)
 end
-RUN(wsli::WSLInstance, cmd::String) = RUN(wsli.pkmg, cmd)
+CMD(wsli::WSLInstance, cmd::String) = CMD(wsli.pkmg, cmd)
+export CMD
+
+function SETENV(pkmg::PkgManager, var, val)
+    pkmg.current_pkg_env_buffer[string(var)] = string(val) 
+end
+SETENV(wsli::WSLInstance, var, val) = SETENV(wsli.pkmg, var, val)
+export SETENV
+
+function ADDENV(pkmg::PkgManager, var, val)
+    SETENV(pkmg, var, "\${$(var)}:$(val)")
+end
+ADDENV(wsli::WSLInstance, var, val) = ADDENV(wsli.pkmg, var, val)
+export ADDENV
 
 function has_pkg(pkmg::PkgManager, p::Package)
     return haskey(pkmg.store, p)
@@ -503,6 +510,8 @@ function with_package(body::Function, pkmg::PkgManager, p::Package)
     lock(pkmg.current_pkg_mutex) do
         __save = pkmg.current_pkg
         pkmg.current_pkg = p
+        pkmg.current_pkg_cmds_buffer = Vector{String}()
+        pkmg.current_pkg_env_buffer = Dict{String, String}()
         body(p)
         pkmg.current_pkg = __save
     end
@@ -525,14 +534,14 @@ function fetch_pkg_data!(pkmg::PkgManager, p::Package)
     return pkmg.store[p]
 end
 
-function add_pkg!(pkmg::PkgManager, p::Package; additonnal_deps::Vector{Package} = Vector{Package}())
+function add_pkg!(pkmg::PkgManager, p::Package)
     push!(pkmg.packages, p)
     for pp in p.dependencies
-        push!(pkmg.packages, pp)
+        add_pkg!(pkmg, pp)
     end
 end
-function add_pkg!(wsli::WSLInstance, p::Package; additonnal_deps::Vector{Package} = Vector{Package}())
-    add_pkg!(wsli.pkmg, p; additonnal_deps = additonnal_deps)
+function add_pkg!(wsli::WSLInstance, p::Package)
+    add_pkg!(wsli.pkmg, p)
 end
 
 function setup_pkg!(pkmg::PkgManager, p::Package)
@@ -565,18 +574,21 @@ function build_pkg!(pkmg::PkgManager, p::Package)
     # -------------------------------------------------
     # build.sh
     # -------------------------------------------------
+    if !pkmg.store[p].should_run_build
+        return
+    end
+
     # Generate `build.sh` of package of host, and send it to the instance
     if !isfile(pkg_build_file(pkmg, p).host |> string)
         touch(pkg_build_file(pkmg, p).host |> string)
     end
     if !isnothing(p.on_build)
-        # This will fill `pkmg.current_pkg_buffer`
+        # This will fill `pkmg.current_pkg_cmds_buffer`
         with_package(pkmg, p) do package
-            pkmg.current_pkg_buffer = Vector{String}()
             package.on_build(pkmg.wsli)
             # Now, put the content in the package's file
-            open(pkg_build_file(pkmg, p).host |> string, "w+") do f
-                for line in pkmg.current_pkg_buffer
+            open(pkg_build_file(pkmg, package).host |> string, "w+") do f
+                for line in pkmg.current_pkg_cmds_buffer
                     write(f, line * "\n")
                 end
             end
@@ -585,10 +597,8 @@ function build_pkg!(pkmg::PkgManager, p::Package)
     copy_to_instance(pkmg.wsli, pkg_build_file(pkmg, p))
 
     # Build actual package
-    if pkmg.store[p].should_run_build
-        info(pkmg.wsli, "Building package `$(name(p)): $(versionstr(p))`")
-        run_on_instance(pkmg.wsli, "sh $(pkg_build_file(pkmg, p).instance)", false)
-    end
+    info(pkmg.wsli, "Building package `$(name(p)): $(versionstr(p))`")
+    run_on_instance(pkmg.wsli, "sh $(pkg_build_file(pkmg, p).instance)", false)
     pkmg.store[p].should_run_build = false
     return nothing
 end
@@ -597,18 +607,21 @@ function install_pkg!(pkmg::PkgManager, p::Package)
     # -------------------------------------------------
     # install.sh
     # -------------------------------------------------
+    if !pkmg.store[p].should_run_install
+        return
+    end
+
     # Generate `install.sh` of package of host, and send it to the instance
     if !isfile(pkg_install_file(pkmg, p).host |> string)
         touch(pkg_install_file(pkmg, p).host |> string)
     end
     if !isnothing(p.on_install)
-        # This will fill `pkmg.current_pkg_buffer`
+        # This will fill `pkmg.current_pkg_cmds_buffer`
         with_package(pkmg, p) do package
-            pkmg.current_pkg_buffer = Vector{String}()
             package.on_install(pkmg.wsli)
             # Now, put the content in the package's file
-            open(pkg_install_file(pkmg, p).host |> string, "w+") do f
-                for line in pkmg.current_pkg_buffer
+            open(pkg_install_file(pkmg, package).host |> string, "w+") do f
+                for line in pkmg.current_pkg_cmds_buffer
                     write(f, line * "\n")
                 end
             end
@@ -617,10 +630,8 @@ function install_pkg!(pkmg::PkgManager, p::Package)
     copy_to_instance(pkmg.wsli, pkg_install_file(pkmg, p))
 
     # Install actual package
-    if pkmg.store[p].should_run_install
-        info(pkmg.wsli, "Installing package `$(name(p)): $(versionstr(p))`")
-        run_on_instance(pkmg.wsli, "sh $(pkg_install_file(pkmg, p).instance)", true)
-    end
+    info(pkmg.wsli, "Installing package `$(name(p)): $(versionstr(p))`")
+    run_on_instance(pkmg.wsli, "sh $(pkg_install_file(pkmg, p).instance)", true)
 
     pkmg.store[p].should_run_install = false
     return nothing
@@ -629,32 +640,33 @@ end
 
 function bashrc_pkg!(pkmg::PkgManager, p::Package)
     # -------------------------------------------------
-    # install.sh
+    # bashrc.sh
     # -------------------------------------------------
+    if !pkmg.store[p].should_run_install
+        return
+    end
+
     # Generate `install.sh` of package of host, and send it to the instance
     if !isfile(pkg_bashrc_file(pkmg, p).host |> string)
         touch(pkg_bashrc_file(pkmg, p).host |> string)
     end
-    if !isnothing(p.on_bashrc) || length(p.with_env) > 0
-        # This will fill `pkmg.current_pkg_buffer`
+    if !isnothing(p.on_bashrc)
+        # This will fill `pkmg.current_pkg_cmds_buffer`
         with_package(pkmg, p) do package
-            pkmg.current_pkg_buffer = Vector{String}()
-            if !isnothing(p.on_bashrc) 
-                package.on_bashrc(pkmg.wsli)
-            end
-            # Add user env
-            for (k,v) in p.with_env
-                push!(pkmg.current_pkg_buffer, "export $(k)=$(v)")
-            end
+            package.on_bashrc(pkmg.wsli)
             # Now, put the content in the package's file
             open(pkg_bashrc_file(pkmg, p).host |> string, "w+") do f
-                for line in pkmg.current_pkg_buffer
+                for line in pkmg.current_pkg_cmds_buffer
                     write(f, line * "\n")
+                end
+                for (var, val) in pkmg.current_pkg_env_buffer
+                    write(f, "export $(var)=$(val)\n")
                 end
             end
         end
     end
     copy_to_instance(pkmg.wsli, pkg_bashrc_file(pkmg, p))
+    info(pkmg.wsli, "Setup package `$(name(p)): $(versionstr(p))`")
     return nothing
 end
 
