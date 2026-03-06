@@ -2,8 +2,8 @@ function AptGet()::Package
     return Package(
         "AptGet"; requires = [],
         on_install = wsli -> begin
-            CMD(wsli, "sudo apt-get upgrade -y")
-            CMD(wsli, "sudo apt-get update -y")
+            CMD(wsli, "$(sudo(wsli)) apt-get upgrade -y")
+            CMD(wsli, "$(sudo(wsli)) apt-get update -y")
         end
     )
 end
@@ -14,19 +14,19 @@ function AptBundle(bname::String, bundle::String...)::Package
     return Package(
         bname; requires = [],
         on_install = wsli -> begin
-            CMD(wsli, "sudo apt-get upgrade -y")
-            CMD(wsli, "sudo apt-get update -y")
-            CMD(wsli, "sudo apt-get install -y $(packages)")
+            CMD(wsli, "$(sudo(wsli)) apt-get upgrade -y")
+            CMD(wsli, "$(sudo(wsli)) apt-get update -y")
+            CMD(wsli, "$(sudo(wsli)) apt-get install -y $(packages)")
         end,
         on_update = wsli -> begin
-            CMD(wsli, "sudo apt-get upgrade -y")
-            CMD(wsli, "sudo apt-get update -y")
-            CMD(wsli, "sudo apt-get install -y --only-upgrade $(packages)")
+            CMD(wsli, "$(sudo(wsli)) apt-get upgrade -y")
+            CMD(wsli, "$(sudo(wsli)) apt-get update -y")
+            CMD(wsli, "$(sudo(wsli)) apt-get install -y --only-upgrade $(packages)")
         end,
         on_delete = wsli -> begin
-            CMD(wsli, "sudo apt-get upgrade -y")
-            CMD(wsli, "sudo apt-get update -y")
-            CMD(wsli, "sudo apt-get purge --auto-remove $(packages)")
+            CMD(wsli, "$(sudo(wsli)) apt-get upgrade -y")
+            CMD(wsli, "$(sudo(wsli)) apt-get update -y")
+            CMD(wsli, "$(sudo(wsli)) apt-get purge --auto-remove $(packages)")
         end
     )
 end
@@ -36,13 +36,13 @@ function AptPackage(pname::String)::Package
     return Package(
         pname; requires = [AptGet()],
         on_install = wsli -> begin
-            CMD(wsli, "sudo apt-get install -y $(pname)")
+            CMD(wsli, "$(sudo(wsli)) apt-get install -y $(pname)")
         end,
         on_update = wsli -> begin
-            CMD(wsli, "sudo apt-get install -y --only-upgrade $(pname)")
+            CMD(wsli, "$(sudo(wsli)) apt-get install -y --only-upgrade $(pname)")
         end,
         on_delete = wsli -> begin
-            CMD(wsli, "sudo apt-get purge --auto-remove $(pname)")
+            CMD(wsli, "$(sudo(wsli)) apt-get purge --auto-remove $(pname)")
         end
     )
 end
@@ -74,8 +74,8 @@ function GccAMD64(version = v"15.2.0"; additonnal_deps::Vector{Package} = Vector
         # Build tarball        
         on_build = wsli -> begin
             thisp = current_pkg(pkmg(wsli))
-            CMD(wsli, "sudo mkdir -p $(build_dir(wsli, thisp))")
-            CMD(wsli, "sudo mkdir -p $(install_dir(wsli, thisp))")
+            CMD(wsli, "$(sudo(wsli)) mkdir -p $(build_dir(wsli, thisp))")
+            CMD(wsli, "$(sudo(wsli)) mkdir -p $(install_dir(wsli, thisp))")
             CMD(wsli, "cd $(build_dir(wsli, thisp))")
             CMD(wsli, "wget https://github.com/gcc-mirror/gcc/archive/refs/tags/releases/gcc-$(version).zip")
             CMD(wsli, "unzip gcc-$(version).zip")
@@ -198,7 +198,7 @@ function CPythonAMD64(
     )
 
     return Package(
-        "python", version; requires = [],
+        "python", version; requires = [additonnal_deps...],
         # Always run install script for outer package
         should_build = wsli -> !isfile(final_tarball(wsli, build_pkg).host |> string),
         on_build = wsli -> begin
@@ -266,7 +266,7 @@ function SSHKeys(local_pub, local_priv, local_known_hosts = nothing)::Package
                 if !isnothing(host_file)
                     filename = CLI.basename(hostshell(wsli), Paths.PosixPath(host_file))
                     copy_to_instance(wsli, PathBridge(host_file => Paths.joinpath(home(wsli), ".ssh", filename)))
-                    CMD(wsli, "sudo chmod 600 $(Paths.joinpath(home(wsli), ".ssh", filename))")
+                    CMD(wsli, "$(sudo(wsli)) chmod 600 $(Paths.joinpath(home(wsli), ".ssh", filename))")
                 end
             end
         end
@@ -286,3 +286,17 @@ function DotNet()::Package
     )
 end
 export DotNet
+
+function wslu()::Package
+    # See: https://wslu.wedotstud.io/wslu/install.html
+    # https://itsfoss.com/add-apt-repository-command-not-found/
+    return Package(
+        "wslu"; requires = [AptPackage("software-properties-common")],
+        on_install = wsli -> begin
+            CMD(wsli, "$(sudo(wsli)) add-apt-repository ppa:wslutilities/wslu -y")
+            CMD(wsli, "$(sudo(wsli)) apt-get install wslu -y")
+        end
+    )
+end
+
+export wslu

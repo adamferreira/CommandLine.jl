@@ -23,12 +23,38 @@ joinbridge(pb::PathBridge, args...) = PathBridge(Paths.joinpath(pb.host, args...
 
 global WSLJLHOSTHOME = Paths.joinpath(Paths.pathtype()(ENV["HOME"]), ".wsljl")
 export WSLJLHOSTHOME
-if !isdir(WSLJLHOSTHOME |> string)
-    mkdir(WSLJLHOSTHOME |> string)
+struct Tarball
+    name::String
+    url::Union{Nothing, String}
+    hostpath::Union{Nothing, Paths.AbstractPath, String}
 end
+export Tarball
 
+function LocalTarball(path::Union{Paths.AbstractPath, String})::Tarball
+    ppath = Paths.pathtype()(path)
+    return Tarball(basename(string(ppath)), nothing, ppath)
+end
+export LocalTarball
 
+function RemoteTarball(url::String)::Tarball
+    name = split(url, '/')[end]
+    return Tarball(name, url, nothing)
+end
+export RemoteTarball
 
+RemoteUbuntu24() = RemoteTarball("https://cloud-images.ubuntu.com/wsl/releases/24.04/current/ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz")
+
+function SETUP_WSLJL()
+    if !isdir(WSLJLHOSTHOME |> string)
+        mkdir(WSLJLHOSTHOME |> string)
+    end
+    if !isfile(Paths.joinpath(WSLJLHOSTHOME, "WSLJL_Default_Base.tar.gz") |> string)
+        tarball = RemoteUbuntu24()
+        location = string(Paths.joinpath(WSLJLHOSTHOME, "WSLJL_Default_Base.tar.gz"))
+        @info "Downloading `$(tarball.name)`"
+        run(`curl $(tarball.url) --output $(location)`)
+    end
+end
 mutable struct WSLInstance
     # Custom name of the instance
     name::String
@@ -38,30 +64,29 @@ mutable struct WSLInstance
     hostshell::Union{Nothing, CLI.Shell}
     # Workspace where all files will be copied before copying into the running instance, lives on host
     workspace::Paths.WindowsPath
-    # Filesystem directory for the instance
-    # Contains the .vhdx file and other utils used by this package
-    fsroot_host::Paths.WindowsPath
     # Package manager
     pkmg
-    # Location of the tarball used to build this intance, is Nothing if `this` is generated from already running instance
-    tarball_location::Union{Nothing, Paths.AbstractPath}
+    # Where to find the tarball to deploy this instance
+    tarball::Tarball
 
     function WSLInstance(
         name::String,
         user::String,
-        filesystem_root::Union{String, Paths.WindowsPath},
+        tarball::Tarball = Tarball("Default", nothing, Paths.joinpath(WSLJLHOSTHOME, "WSLJL_Default_Base.tar.gz")),
         s::CLI.Shell = CLI.GitBash();
     )
         # Create temporary workspace for this app (posix path form)
         wpname = "$(name)_$(Base.hash(name))"
         workspace_host = Paths.pathtype()(Base.joinpath(Base.pwd(), wpname))
 
-        # Get paths for root filesystem
-        fsroot_host = Paths.pathtype()("$(filesystem_root)")
-
-        wsli = new(name, user, s, workspace_host, fsroot_host, nothing, nothing)
+        wsli = new(name, user, s, workspace_host, nothing, tarball)
         wsli.pkmg = PkgManager(wsli)
         clean_workspace(wsli)
+
+        if !isdir(fsroot(wsli) |> string)
+            mkdir(fsroot(wsli) |> string)
+        end
+
         return wsli
     end
 end
@@ -79,12 +104,21 @@ home(wsli::WSLInstance) = Paths.PosixPath("/home/$(user(wsli))")
 export home
 cachedir(wsli::WSLInstance) = Paths.joinpath(home(wsli), ".wsljl")
 export cachedir
-fsroot(wsli::WSLInstance) = wsli.fsroot_host
+# Filesystem directory for the instance
+# Contains the .vhdx file and other utils used by this package
+fsroot(wsli::WSLInstance) = Paths.joinpath(WSLJLHOSTHOME, "Instance_$(name(wsli))")
 export fsroot
 sudo(wsli::WSLInstance) = user(wsli) ==  "root" ? "" : "sudo"
 
-pkmg(wsli) = wsli.pkmg
-tarball_location(wsli) = wsli.tarball_location
+pkmg(wsli::WSLInstance) = wsli.pkmg
+
+function host_tarball_location(wsli::WSLInstance)
+    return wsli.tarball.hostpath
+end
+
+function host_tarball_exists(wsli::WSLInstance)
+    return isfile(string(host_tarball_location(wsli)))
+end
 
 # Drive that is shared between WSL instances
 wsl_shared_drive() = Paths.PosixPath("/mnt", "wsl")
@@ -230,14 +264,12 @@ export isrunning
 
 unregister!(wsli::WSLInstance) = run_on_host_interactive(wsli, `wsl --unregister $(name(wsli))`)
 
-function import_from_scratch!(
+function deploy!(
     wsli::WSLInstance;
-    local_tarball::Union{Nothing, Paths.WindowsPath} = nothing,
-    remote_tarball::Union{Nothing, String} = nothing,
     regenerate_if_exists::Bool = false,
 )
 
-    function deploy_from_local_tarball(wsli::WSLInstance, tarball::Paths.WindowsPath)
+    function deploy_from_local_tarball(wsli::WSLInstance, tarball::Paths.AbstractPath)
         # Check tarball
         if !isfile(tarball |> string)
             throw("Could not find tarball $(tarball)")
@@ -251,8 +283,6 @@ function import_from_scratch!(
                 error(wsli, "Could not create filesystem root $(fsroot(wsli))")
                 throw(e)
             end
-        else
-            throw("Filesystem Root $(fsroot(wsli)) already exists")
         end
 
         # Create instance
@@ -290,23 +320,31 @@ function import_from_scratch!(
                 done
             """
             write(f, load_loop * "\n\n")
+
+            # Change /etc/wsl.conf to make user(wsli) the default logged user !
+            wslconf = PathBridge(Paths.joinpath(workspace(wsli), "wsl.conf") => Paths.PosixPath("/etc", "wsl.conf"))
+            open(wslconf.host |> string, "w+") do f
+                write(f, "[boot]\n")
+                write(f, "systemd=true\n")
+                write(f, "[user]\n")
+                write(f, "default=aferreira\n")
+            end
+            copy_to_instance(wsli, wslconf)
+            # Stop the instance to force restart and apply changes
+            # Will restart automatically next time `run_on_host*` is called. 
+            stop(wsli)
         end
         copy_to_instance(wsli, bashrc)
     end
 
-    function deploy_from_remote_tarball(wsli::WSLInstance, url::String)
-        tarball = split(url, '/')[end]
-        wsli.tarball_location = Paths.joinpath(workspace(wsli) |> string, tarball)
-        info(wsli, "Downloading `$(tarball)`")
-        run_on_host_interactive(wsli, `curl $(url) --output $(wsli.tarball_location)`)
-        deploy_from_local_tarball(wsli, wsli.tarball_location)
+    function deploy_from_remote_tarball(wsli::WSLInstance)
+        info(wsli, "Downloading `$(wsli.tarball.name)`")
+        run_on_host_interactive(wsli, `curl $(wsli.tarball.url) --output $(host_tarball_location(wsli))`)
+        deploy_from_local_tarball(wsli, host_tarball_location(wsli))
     end
 
     try
         create_workspace(wsli)
-        if !isnothing(local_tarball) && !isnothing(remote_tarball)
-            throw("Can't have value set for both local_tarball and remote_tarball")
-        end
         if exists(wsli)
             if regenerate_if_exists
                 warn(wsli, "Wipping instance `$(name(wsli))`")
@@ -317,13 +355,10 @@ function import_from_scratch!(
         end
 
         if !exists(wsli) || (exists(wsli) && regenerate_if_exists)
-            if !isnothing(local_tarball)
-                wsli.tarball_location = local_tarball
-                deploy_from_local_tarball(wsli, wsli.tarball_location)
-            end
-
-            if !isnothing(remote_tarball)
-                deploy_from_remote_tarball(wsli, remote_tarball)
+            if host_tarball_exists(wsli)
+                deploy_from_local_tarball(wsli, host_tarball_location(wsli))
+            else
+                deploy_from_remote_tarball(wsli)
             end
         end
         instantiate!(wsli.pkmg)
@@ -338,7 +373,7 @@ function import_from_scratch!(
         clean_workspace(wsli)
     end
 end
-export import_from_scratch!
+export deploy!
 
 # Open session in the instance
 function enter(wsli::WSLInstance)
@@ -350,6 +385,10 @@ function enter(wsli::WSLInstance)
 end
 export enter
 
+function stop(wsli::WSLInstance)
+    run_on_host_interactive(wsli, `wsl --terminate $(name(wsli))`)
+end
+export stop
 
 
 
@@ -642,10 +681,6 @@ function bashrc_pkg!(pkmg::PkgManager, p::Package)
     # -------------------------------------------------
     # bashrc.sh
     # -------------------------------------------------
-    if !pkmg.store[p].should_run_install
-        return
-    end
-
     # Generate `install.sh` of package of host, and send it to the instance
     if !isfile(pkg_bashrc_file(pkmg, p).host |> string)
         touch(pkg_bashrc_file(pkmg, p).host |> string)
@@ -698,5 +733,5 @@ function instantiate!(pkmg::PkgManager)
 end
 
 include("packages.jl")
-
+SETUP_WSLJL()
 end # Module WSL
