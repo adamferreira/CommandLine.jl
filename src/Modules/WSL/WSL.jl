@@ -327,7 +327,7 @@ function deploy!(
                 write(f, "[boot]\n")
                 write(f, "systemd=true\n")
                 write(f, "[user]\n")
-                write(f, "default=aferreira\n")
+                write(f, "default=$(user(wsli))\n")
             end
             copy_to_instance(wsli, wslconf)
             # Stop the instance to force restart and apply changes
