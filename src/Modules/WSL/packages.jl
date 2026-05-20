@@ -53,8 +53,8 @@ CmakeSuite() = AptBundle("CmakeSuite", "make", "cmake", "cmake-curses-gui")
 export CmakeSuite
 
 function GccAMD64(version = v"15.2.0"; additonnal_deps::Vector{Package} = Vector{Package}())::Package
-    install_dir = (wsli, p) -> Paths.joinpath(pkg_datadir(pkmg(wsli), p).instance, "install")
-    build_dir = (wsli, p) -> Paths.joinpath(pkg_datadir(pkmg(wsli), p).instance, "build")
+    pkg_install_workspace = (wsli, p) -> Paths.joinpath(pkg_datadir(pkmg(wsli), p).instance, "install")
+    pkg_build_workspace = (wsli, p) -> Paths.joinpath(pkg_datadir(pkmg(wsli), p).instance, "build")
     tarball_name = (wsli, p) -> "$(pretty_name(p)).tar.gz"
     final_tarball = (wsli, p) -> PathBridge(Paths.joinpath(WSLJLHOSTHOME, tarball_name(wsli, p)) => Paths.joinpath(pkg_datadir(pkmg(wsli), p).instance, tarball_name(wsli, p)))
 
@@ -74,18 +74,18 @@ function GccAMD64(version = v"15.2.0"; additonnal_deps::Vector{Package} = Vector
         # Build tarball        
         on_build = wsli -> begin
             thisp = current_pkg(pkmg(wsli))
-            CMD(wsli, "$(sudo(wsli)) mkdir -p $(build_dir(wsli, thisp))")
-            CMD(wsli, "$(sudo(wsli)) mkdir -p $(install_dir(wsli, thisp))")
-            CMD(wsli, "cd $(build_dir(wsli, thisp))")
+            CMD(wsli, "$(sudo(wsli)) mkdir -p $(pkg_build_workspace(wsli, thisp))")
+            CMD(wsli, "$(sudo(wsli)) mkdir -p $(pkg_install_workspace(wsli, thisp))")
+            CMD(wsli, "cd $(pkg_build_workspace(wsli, thisp))")
             CMD(wsli, "wget https://github.com/gcc-mirror/gcc/archive/refs/tags/releases/gcc-$(version).zip")
             CMD(wsli, "unzip gcc-$(version).zip")
             CMD(wsli, "cd gcc-releases-gcc-$(version)")
             CMD(wsli, "./contrib/download_prerequisites")
-            CMD(wsli, "./configure --prefix=$(install_dir(wsli,thisp)) --disable-multilib --enable-languages=c,c++")
+            CMD(wsli, "./configure --prefix=$(pkg_install_workspace(wsli,thisp)) --disable-multilib --enable-languages=c,c++")
             CMD(wsli, "make -j16")
             CMD(wsli, "make install")
             # Make tarball
-            CMD(wsli, "tar -cvf $(final_tarball(wsli, thisp).instance) -C $(install_dir(wsli, thisp)) .")
+            CMD(wsli, "tar -cvf $(final_tarball(wsli, thisp).instance) -C $(pkg_install_workspace(wsli, thisp)) .")
         end,
         # Move tarball to host (`on_install` is run AFTER `on_build`)
         on_install = wsli -> begin
@@ -101,7 +101,7 @@ function GccAMD64(version = v"15.2.0"; additonnal_deps::Vector{Package} = Vector
             # Create a buffer WSL instance to compile the Package
             # This will avoid install all the package dependencies into the the main target instance
             # This also avoid having the build data into the main instance
-            info(wsli, "Creating external instance `pretty_name(build_pkg)` to build `$(name(build_pkg)):$(version(build_pkg))`")
+            info(wsli, "Creating external instance `pretty_name(build_pkg)` to build `$(name(build_pkg)):$(version)`")
             tmp_wsli = WSLInstance(pretty_name(build_pkg), user(wsli), Paths.joinpath(workspace(wsli), uid(build_pkg)))
             add_pkg!(tmp_wsli, build_pkg)
             try
@@ -119,15 +119,15 @@ function GccAMD64(version = v"15.2.0"; additonnal_deps::Vector{Package} = Vector
         # At this point, the tarball SHOULD exist on host
         on_install = wsli -> begin
             # Move local tarball to instance
-            run_on_instance(wsli, "$(sudo(wsli)) mkdir -p $(install_dir(wsli, build_pkg))")
+            run_on_instance(wsli, "$(sudo(wsli)) mkdir -p $(pkg_install_workspace(wsli, build_pkg))")
             copy_to_instance(wsli, final_tarball(wsli, build_pkg))
             # Extract tarball to desired folder
-            CMD(wsli, "$(sudo(wsli)) tar -xvf $(final_tarball(wsli, build_pkg).instance) -C $(install_dir(wsli, build_pkg))")
+            CMD(wsli, "$(sudo(wsli)) tar -xvf $(final_tarball(wsli, build_pkg).instance) -C $(pkg_install_workspace(wsli, build_pkg))")
             # Remove tarball after extraction
             CMD(wsli, "$(sudo(wsli)) rm $(final_tarball(wsli, build_pkg).instance)")
             # Set defaults
-            CMD(wsli, "$(sudo(wsli)) update-alternatives --install /usr/bin/g++ g++ $(install_dir(wsli, build_pkg))/bin/g++ 100")
-            CMD(wsli, "$(sudo(wsli)) update-alternatives --install /usr/bin/gcc gcc $(install_dir(wsli, build_pkg))/bin/gcc 100")
+            CMD(wsli, "$(sudo(wsli)) update-alternatives --install /usr/bin/g++ g++ $(pkg_install_workspace(wsli, build_pkg))/bin/g++ 100")
+            CMD(wsli, "$(sudo(wsli)) update-alternatives --install /usr/bin/gcc gcc $(pkg_install_workspace(wsli, build_pkg))/bin/gcc 100")
         end
         # TODO: Add CC and CXX to bashrc
     )
@@ -139,8 +139,6 @@ function CPythonAMD64(
     additonnal_deps::Vector{Package} = Vector{Package}(),
     pip_packages::Vector{String} = Vector{String}()
 )::Package
-    install_dir = (wsli, p) -> Paths.joinpath(pkg_datadir(pkmg(wsli), p).instance, "install")
-    build_dir = (wsli, p) -> Paths.joinpath(pkg_datadir(pkmg(wsli), p).instance, "build")
     tarball_name = (wsli, p) -> "$(pretty_name(p)).tar.gz"
     final_tarball = (wsli, p) -> PathBridge(Paths.joinpath(WSLJLHOSTHOME, tarball_name(wsli, p)) => Paths.joinpath(pkg_datadir(pkmg(wsli), p).instance, tarball_name(wsli, p)))
 
@@ -179,17 +177,18 @@ function CPythonAMD64(
         # Build tarball        
         on_build = wsli -> begin
             thisp = current_pkg(pkmg(wsli))
-            CMD(wsli, "$(sudo(wsli)) mkdir -p $(build_dir(wsli, thisp))")
-            CMD(wsli, "$(sudo(wsli)) mkdir -p $(install_dir(wsli, thisp))")
-            CMD(wsli, "cd $(build_dir(wsli, thisp))")
+            # TODO: automate this part
+            CMD(wsli, "$(sudo(wsli)) mkdir -p $(pkg_build_workspace(wsli, thisp))")
+            CMD(wsli, "$(sudo(wsli)) mkdir -p $(pkg_install_workspace(wsli, thisp))")
+            CMD(wsli, "cd $(pkg_build_workspace(wsli, thisp))")
             CMD(wsli, "wget https://github.com/python/cpython/archive/refs/tags/v$(version).zip")
             CMD(wsli, "unzip v$(version).zip")
             CMD(wsli, "cd cpython-$(version)")
-            CMD(wsli, "./configure --prefix=$(install_dir(wsli, thisp))")
+            CMD(wsli, "./configure --prefix=$(pkg_install_workspace(wsli, thisp))")
             CMD(wsli, "make -j16")
             CMD(wsli, "make install")
             # Make tarball
-            CMD(wsli, "tar -cvf $(final_tarball(wsli, thisp).instance) -C $(install_dir(wsli, thisp)) .")
+            CMD(wsli, "tar -cvf $(final_tarball(wsli, thisp).instance) -C $(pkg_install_workspace(wsli, thisp)) .")
         end,
         # Move tarball to host (`on_install` is run AFTER `on_build`)
         on_install = wsli -> begin
@@ -223,15 +222,15 @@ function CPythonAMD64(
         # At this point, the tarball SHOULD exist on host
         on_install = wsli -> begin
             # Move local tarball to instance
-            run_on_instance(wsli, "$(sudo(wsli)) mkdir -p $(install_dir(wsli, build_pkg))")
+            run_on_instance(wsli, "$(sudo(wsli)) mkdir -p $(pkg_install_workspace(wsli, build_pkg))")
             copy_to_instance(wsli, final_tarball(wsli, build_pkg))
             # Extract tarball to desired folder
-            CMD(wsli, "$(sudo(wsli)) tar -xvf $(final_tarball(wsli, build_pkg).instance) -C $(install_dir(wsli, build_pkg))")
+            CMD(wsli, "$(sudo(wsli)) tar -xvf $(final_tarball(wsli, build_pkg).instance) -C $(pkg_install_workspace(wsli, build_pkg))")
             # Remove tarball after extraction
             CMD(wsli, "$(sudo(wsli)) rm $(final_tarball(wsli, build_pkg).instance)")
             # Set defaults
-            CMD(wsli, "$(sudo(wsli)) update-alternatives --install /usr/bin/python python $(install_dir(wsli, build_pkg))/bin/python3 100")
-            CMD(wsli, "$(sudo(wsli)) update-alternatives --install /usr/bin/python3 python3 $(install_dir(wsli, build_pkg))/bin/python3 100")
+            CMD(wsli, "$(sudo(wsli)) update-alternatives --install /usr/bin/python python $(pkg_install_workspace(wsli, build_pkg))/bin/python3 100")
+            CMD(wsli, "$(sudo(wsli)) update-alternatives --install /usr/bin/python3 python3 $(pkg_install_workspace(wsli, build_pkg))/bin/python3 100")
             if (length(pip_packages)) > 0
                 for pip_p in pip_packages
                     CMD(wsli, "python -m pip install $(pip_p)")
@@ -287,7 +286,7 @@ function DotNet()::Package
 end
 export DotNet
 
-function wslu()::Package
+function wslu(browser::Symbol = :firefox)::Package
     # See: https://wslu.wedotstud.io/wslu/install.html
     # https://itsfoss.com/add-apt-repository-command-not-found/
     return Package(
@@ -295,6 +294,9 @@ function wslu()::Package
         on_install = wsli -> begin
             CMD(wsli, "$(sudo(wsli)) add-apt-repository ppa:wslutilities/wslu -y")
             CMD(wsli, "$(sudo(wsli)) apt-get install wslu -y")
+        end,
+        on_bashrc = wsli -> begin
+            SETENV(wsli, "BROWSER", "/mnt/c/Program\\ Files/Mozilla\\ Firefox/firefox.exe")
         end
     )
 end

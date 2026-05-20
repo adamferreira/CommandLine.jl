@@ -20,6 +20,7 @@ end
 export PathBridge
 
 joinbridge(pb::PathBridge, args...) = PathBridge(Paths.joinpath(pb.host, args...) => Paths.joinpath(pb.instance, args...))
+export joinbridge
 
 global WSLJLHOSTHOME = Paths.joinpath(Paths.pathtype()(ENV["HOME"]), ".wsljl")
 export WSLJLHOSTHOME
@@ -320,6 +321,13 @@ function deploy!(
                 done
             """
             write(f, load_loop * "\n\n")
+            # Also load user profile
+            load_profile = """
+                if [ -f ~/.bash_profile ]; then
+                    . ~/.bash_profile
+                fi
+            """
+            write(f, load_profile * "\n\n")
 
             # Change /etc/wsl.conf to make user(wsli) the default logged user !
             wslconf = PathBridge(Paths.joinpath(workspace(wsli), "wsl.conf") => Paths.PosixPath("/etc", "wsl.conf"))
@@ -328,6 +336,9 @@ function deploy!(
                 write(f, "systemd=true\n")
                 write(f, "[user]\n")
                 write(f, "default=$(user(wsli))\n")
+                write(f, "[interop]\n")
+                write(f, "enabled=true\n")
+                write(f, "appendWindowsPath=false\n")
             end
             copy_to_instance(wsli, wslconf)
             # Stop the instance to force restart and apply changes
@@ -512,6 +523,16 @@ storedir(pkmg::PkgManager) = PathBridge(Paths.joinpath(workspace(pkmg.wsli), "pa
 storefile(pkmg::PkgManager) = joinbridge(storedir(pkmg), "packages.csv")
 # For a given package, gives the path to its data folder
 pkg_datadir(pkmg::PkgManager, p::Package) = joinbridge(storedir(pkmg), pretty_name(p))
+pkg_datadir(wsli::WSLInstance, p::Package) = pkg_datadir(pkmg(wsli), p)
+export pkg_datadir
+# Workspace used by `install` and `build` steps of a package
+pkg_build_workspace(pkmg::PkgManager, p::Package) = joinbridge(pkg_datadir(pkmg, p), "build").instance
+pkg_build_workspace(wsli::WSLInstance, p::Package) = pkg_build_workspace(pkmg(wsli), p)
+export pkg_build_workspace
+pkg_install_workspace(pkmg::PkgManager, p::Package) = joinbridge(pkg_datadir(pkmg, p), "install").instance
+pkg_install_workspace(wsli::WSLInstance, p::Package) = pkg_install_workspace(pkmg(wsli), p)
+export pkg_install_workspace
+
 # Files used to install, update, or delete a package
 pkg_bashrc_file(pkmg::PkgManager, p::Package) = joinbridge(pkg_datadir(pkmg, p), "bashrc.sh")
 pkg_build_file(pkmg::PkgManager, p::Package) = joinbridge(pkg_datadir(pkmg, p), "build.sh")
@@ -522,6 +543,7 @@ pkg_delete_file(pkmg::PkgManager, p::Package) = joinbridge(pkg_datadir(pkmg, p),
 
 current_pkg(pkmg::PkgManager) = pkmg.current_pkg
 current_pkg(wsli::WSLInstance) = current_pkg(wsli.pkmg)
+export current_pkg
 
 function CMD(pkmg::PkgManager, cmd::String)
     push!(pkmg.current_pkg_cmds_buffer, cmd)
@@ -595,6 +617,9 @@ function setup_pkg!(pkmg::PkgManager, p::Package)
     if !dt.already_on_instance
         # Create package cache folder on instance
         run_on_instance(pkmg.wsli, "sudo mkdir -p $(pkg_datadir(pkmg, p).instance)")
+        run_on_instance(pkmg.wsli, "sudo mkdir -p $(pkg_build_workspace(pkmg, p))")
+        run_on_instance(pkmg.wsli, "sudo mkdir -p $(pkg_install_workspace(pkmg, p))")
+        run_on_instance(pkmg.wsli, "sudo chown -R $(user(pkmg.wsli)) $(pkg_datadir(pkmg, p).instance)")
     end
 
     # Create package cache folder on host
